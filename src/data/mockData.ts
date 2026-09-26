@@ -34,6 +34,7 @@ export const initialInventoryState: InventoryState = {
     { id: 'p6', name: 'Safety Helmets', sku: 'SFT-HLM-014', categoryId: 'c2', unit: 'pcs', reorderPoint: 40, defaultWarehouseId: 'w1', defaultLocationId: 'l1' },
     { id: 'p7', name: 'Bearing Assembly', sku: 'BRG-ASM-311', categoryId: 'c1', unit: 'set', reorderPoint: 20, defaultWarehouseId: 'w2', defaultLocationId: 'l4' },
     { id: 'p8', name: 'Packaging Boxes', sku: 'PKG-BOX-201', categoryId: 'c4', unit: 'bundle', reorderPoint: 100, defaultWarehouseId: 'w1', defaultLocationId: 'l3' },
+    { id: 'p9', name: 'Safety Gloves', sku: 'SFT-GLV-020', categoryId: 'c2', unit: 'pair', reorderPoint: 25, defaultWarehouseId: 'w2', defaultLocationId: 'l5' },
   ],
   stockItems: [
     { id: 's1', productId: 'p1', warehouseId: 'w1', locationId: 'l1', onHand: 500, reserved: 40 },
@@ -44,6 +45,7 @@ export const initialInventoryState: InventoryState = {
     { id: 's6', productId: 'p6', warehouseId: 'w1', locationId: 'l1', onHand: 22, reserved: 3 },
     { id: 's7', productId: 'p7', warehouseId: 'w2', locationId: 'l4', onHand: 12, reserved: 4 },
     { id: 's8', productId: 'p8', warehouseId: 'w1', locationId: 'l3', onHand: 180, reserved: 30 },
+    { id: 's9', productId: 'p9', warehouseId: 'w2', locationId: 'l5', onHand: 0, reserved: 0 },
   ],
   receipts: [
     {
@@ -120,13 +122,13 @@ export const initialInventoryState: InventoryState = {
       reason: 'Damaged during handling',
       status: 'applied',
       createdBy: 'u1',
-      date: isoDay(-1),
+      date: isoDay(0),
     },
   ],
   moveHistory: [
     {
       id: 'm1',
-      timestamp: isoDay(-1),
+      timestamp: isoDay(0),
       reference: 'REC-2026-000',
       operation: 'Receipt',
       productId: 'p1',
@@ -139,7 +141,7 @@ export const initialInventoryState: InventoryState = {
     },
     {
       id: 'm2',
-      timestamp: isoDay(-1),
+      timestamp: isoDay(0),
       reference: 'ADJ-2026-001',
       operation: 'Adjustment',
       productId: 'p4',
@@ -155,6 +157,7 @@ export const initialInventoryState: InventoryState = {
     { id: 'rr1', productId: 'p1', warehouseId: 'w1', locationId: 'l1', minQty: 120, maxQty: 700 },
     { id: 'rr2', productId: 'p6', warehouseId: 'w1', locationId: 'l1', minQty: 40, maxQty: 120 },
     { id: 'rr3', productId: 'p7', warehouseId: 'w2', locationId: 'l4', minQty: 20, maxQty: 60 },
+    { id: 'rr4', productId: 'p9', warehouseId: 'w2', locationId: 'l5', minQty: 25, maxQty: 80 },
   ],
   notifications: [
     { id: 'n1', title: 'Low stock alert', message: 'Bearing Assembly is below reorder level.', read: false, createdAt: isoDay(0) },

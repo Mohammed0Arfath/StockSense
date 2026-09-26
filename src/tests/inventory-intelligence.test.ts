@@ -44,6 +44,14 @@ describe('StockSense intelligence rules', () => {
     expect(risks.some((risk) => risk.id === 'location:rr3' && risk.href === '/locations/l4')).toBe(true)
   })
 
+  it('limits repeated-adjustment health and risk to the prior 30 days', () => {
+    const state = structuredClone(initialInventoryState)
+    state.stockItems.find((row) => row.productId === 'p1')!.onHand = 500
+    state.moveHistory.push(...[1, 2, 3].map((id) => ({ id: `old-adj-${id}`, timestamp: new Date(NOW - 31 * 24 * 60 * 60 * 1000).toISOString(), reference: `OLD-${id}`, operation: 'Adjustment' as const, productId: 'p1', sku: 'STL-ROD-001', source: 'A', destination: 'A', quantity: -1, user: 'Test', status: 'Applied' })))
+    expect(getInventoryHealth(state, NOW).find((row) => row.product.id === 'p1')?.status).toBe('Healthy')
+    expect(getStockRiskInsights(state, NOW).some((risk) => risk.id === 'adjustments:p1')).toBe(false)
+  })
+
   it('derives operational insights from existing documents and movement history', () => {
     const insights = getOperationalInsights(initialInventoryState, NOW)
     expect(insights.some((item) => item.title.includes('REC-2026-001') && item.href === '/receipts/r1')).toBe(true)

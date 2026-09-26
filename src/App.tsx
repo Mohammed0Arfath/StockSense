@@ -1,23 +1,39 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
-import { LoginPage, SignupPage, ForgotPasswordPage, ResetPasswordPage } from './features/auth/AuthPages'
-import { DashboardPage } from './features/dashboard/DashboardPage'
-import { ProductsPage } from './features/products/ProductsPage'
-import { ProductDetailPage } from './features/products/ProductDetailPage'
-import { StockPage } from './features/stock/StockPage'
-import { ReceiptsPage, ReceiptNewPage, ReceiptDetailPage } from './features/receipts/ReceiptsPages'
-import { DeliveriesPage, DeliveryNewPage, DeliveryDetailPage } from './features/deliveries/DeliveriesPages'
-import { TransfersPage, TransferNewPage, TransferDetailPage } from './features/transfers/TransfersPages'
-import { AdjustmentsPage, AdjustmentNewPage, AdjustmentDetailPage } from './features/adjustments/AdjustmentsPages'
-import { MoveHistoryPage, MoveHistoryDetailPage } from './features/move-history/MoveHistoryPage'
-import { WarehousesPage, WarehouseDetailPage } from './features/warehouses/WarehousesPages'
-import { LocationsPage, LocationDetailPage } from './features/locations/LocationsPages'
-import { ReorderingRulesPage } from './features/reordering-rules/ReorderingRulesPage'
-import { SettingsPage } from './features/settings/SettingsPage'
-import { ProfilePage } from './features/profile/ProfilePage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { useAuth } from './hooks/useAuth'
 import { LoadingState } from './components/shared/states'
+
+const LoginPage = lazy(() => import('./features/auth/AuthPages').then((module) => ({ default: module.LoginPage })))
+const SignupPage = lazy(() => import('./features/auth/AuthPages').then((module) => ({ default: module.SignupPage })))
+const ForgotPasswordPage = lazy(() => import('./features/auth/AuthPages').then((module) => ({ default: module.ForgotPasswordPage })))
+const ResetPasswordPage = lazy(() => import('./features/auth/AuthPages').then((module) => ({ default: module.ResetPasswordPage })))
+const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then((module) => ({ default: module.DashboardPage })))
+const ProductsPage = lazy(() => import('./features/products/ProductsPage').then((module) => ({ default: module.ProductsPage })))
+const ProductDetailPage = lazy(() => import('./features/products/ProductDetailPage').then((module) => ({ default: module.ProductDetailPage })))
+const StockPage = lazy(() => import('./features/stock/StockPage').then((module) => ({ default: module.StockPage })))
+const ReceiptsPage = lazy(() => import('./features/receipts/ReceiptsPages').then((module) => ({ default: module.ReceiptsPage })))
+const ReceiptNewPage = lazy(() => import('./features/receipts/ReceiptsPages').then((module) => ({ default: module.ReceiptNewPage })))
+const ReceiptDetailPage = lazy(() => import('./features/receipts/ReceiptsPages').then((module) => ({ default: module.ReceiptDetailPage })))
+const DeliveriesPage = lazy(() => import('./features/deliveries/DeliveriesPages').then((module) => ({ default: module.DeliveriesPage })))
+const DeliveryNewPage = lazy(() => import('./features/deliveries/DeliveriesPages').then((module) => ({ default: module.DeliveryNewPage })))
+const DeliveryDetailPage = lazy(() => import('./features/deliveries/DeliveriesPages').then((module) => ({ default: module.DeliveryDetailPage })))
+const TransfersPage = lazy(() => import('./features/transfers/TransfersPages').then((module) => ({ default: module.TransfersPage })))
+const TransferNewPage = lazy(() => import('./features/transfers/TransfersPages').then((module) => ({ default: module.TransferNewPage })))
+const TransferDetailPage = lazy(() => import('./features/transfers/TransfersPages').then((module) => ({ default: module.TransferDetailPage })))
+const AdjustmentsPage = lazy(() => import('./features/adjustments/AdjustmentsPages').then((module) => ({ default: module.AdjustmentsPage })))
+const AdjustmentNewPage = lazy(() => import('./features/adjustments/AdjustmentsPages').then((module) => ({ default: module.AdjustmentNewPage })))
+const AdjustmentDetailPage = lazy(() => import('./features/adjustments/AdjustmentsPages').then((module) => ({ default: module.AdjustmentDetailPage })))
+const MoveHistoryPage = lazy(() => import('./features/move-history/MoveHistoryPage').then((module) => ({ default: module.MoveHistoryPage })))
+const MoveHistoryDetailPage = lazy(() => import('./features/move-history/MoveHistoryPage').then((module) => ({ default: module.MoveHistoryDetailPage })))
+const WarehousesPage = lazy(() => import('./features/warehouses/WarehousesPages').then((module) => ({ default: module.WarehousesPage })))
+const WarehouseDetailPage = lazy(() => import('./features/warehouses/WarehousesPages').then((module) => ({ default: module.WarehouseDetailPage })))
+const LocationsPage = lazy(() => import('./features/locations/LocationsPages').then((module) => ({ default: module.LocationsPage })))
+const LocationDetailPage = lazy(() => import('./features/locations/LocationsPages').then((module) => ({ default: module.LocationDetailPage })))
+const ReorderingRulesPage = lazy(() => import('./features/reordering-rules/ReorderingRulesPage').then((module) => ({ default: module.ReorderingRulesPage })))
+const SettingsPage = lazy(() => import('./features/settings/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const ProfilePage = lazy(() => import('./features/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })))
 
 const ProtectedRoute = () => {
   const { isAuthenticated, isLoading } = useAuth()
@@ -27,6 +43,7 @@ const ProtectedRoute = () => {
 
 export default function App() {
   return (
+    <Suspense fallback={<LoadingState />}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
@@ -71,5 +88,6 @@ export default function App() {
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    </Suspense>
   )
 }

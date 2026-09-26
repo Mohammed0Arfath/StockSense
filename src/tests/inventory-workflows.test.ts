@@ -111,6 +111,7 @@ describe('inventory workflows', () => {
     expect(getState().stockItems.find((row) => row.id === 's4')!.onHand).toBe(45)
     expect(getState().moveHistory[0].quantity).toBe(-3)
     expect(getState().moveHistory[0].operation).toBe('Adjustment')
+    expect(getState().moveHistory.filter((entry) => entry.reference === adjustment.adjustmentNumber)).toHaveLength(1)
   })
 
   it('records positive adjustments once and zero adjustments without a stock ledger mutation', async () => {

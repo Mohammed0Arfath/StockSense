@@ -118,7 +118,7 @@ export const DashboardPage = () => {
           <CardContent><InsightLinks items={stockRisks.slice(0, 8)} /></CardContent>
         </Card>
         <Card>
-          <CardHeader>Operational Insights</CardHeader>
+          <CardHeader><div>Operational Insights</div><p className="mt-1 text-xs text-slate-400">Movement and adjustment insights use recorded history from the last 30 days.</p></CardHeader>
           <CardContent><InsightLinks items={operationalInsights} /></CardContent>
         </Card>
       </div>

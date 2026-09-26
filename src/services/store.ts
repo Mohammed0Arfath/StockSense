@@ -17,7 +17,9 @@ export const updateState = (mutator: (draft: InventoryState) => void) => {
 
 export const subscribeState = (listener: () => void) => {
   listeners.add(listener)
-  return () => listeners.delete(listener)
+  return () => {
+    listeners.delete(listener)
+  }
 }
 
 export const resetState = () => {

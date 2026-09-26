@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { ActivityFeed } from '../../components/shared/activity-feed'
 import { MetricCard } from '../../components/shared/metric-card'
 import { PageHeader } from '../../components/shared/page-header'
@@ -6,11 +7,19 @@ import { StatusBadge } from '../../components/shared/status-badge'
 import { Card, CardContent, CardHeader } from '../../components/ui/card'
 import { inventoryService } from '../../services/inventoryService'
 import { getState } from '../../services/store'
+import { useInventoryState } from '../../hooks/useInventoryState'
+import { EmptyState } from '../../components/shared/states'
 
 export const DashboardPage = () => {
+  const inventoryState = useInventoryState()
   const metrics = useQuery({ queryKey: ['dashboard-metrics'], queryFn: () => inventoryService.getDashboardMetrics() })
   const alerts = useQuery({ queryKey: ['stock-alerts'], queryFn: () => inventoryService.getStockAlerts() })
-  const state = getState()
+  const state = inventoryState ?? getState()
+  const pendingOperations = [
+    ...state.receipts.filter((doc) => doc.status !== 'done' && doc.status !== 'canceled').map((doc) => ({ id: doc.id, number: doc.receiptNumber, status: doc.status, href: `/receipts/${doc.id}` })),
+    ...state.deliveries.filter((doc) => doc.status !== 'done' && doc.status !== 'canceled').map((doc) => ({ id: doc.id, number: doc.deliveryNumber, status: doc.status, href: `/deliveries/${doc.id}` })),
+    ...state.transfers.filter((doc) => doc.status !== 'done' && doc.status !== 'canceled').map((doc) => ({ id: doc.id, number: doc.transferNumber, status: doc.status, href: `/transfers/${doc.id}` })),
+  ].slice(0, 6)
 
   return (
     <div className="space-y-4">
@@ -29,12 +38,13 @@ export const DashboardPage = () => {
         <Card className="xl:col-span-2">
           <CardHeader>Pending Operations</CardHeader>
           <CardContent className="space-y-2">
-            {[...state.receipts, ...state.deliveries, ...state.transfers].slice(0, 6).map((doc) => (
+            {pendingOperations.map((doc) => (
               <div key={doc.id} className="flex items-center justify-between rounded border border-slate-800 p-2 text-sm">
-                <span>{'receiptNumber' in doc ? doc.receiptNumber : 'deliveryNumber' in doc ? doc.deliveryNumber : doc.transferNumber}</span>
+                <Link className="text-sky-300" to={doc.href}>{doc.number}</Link>
                 <StatusBadge status={doc.status[0].toUpperCase() + doc.status.slice(1)} />
               </div>
             ))}
+            {pendingOperations.length === 0 ? <EmptyState title="No pending operations" message="Validated and canceled documents are cleared from this list." /> : null}
           </CardContent>
         </Card>
         <Card>

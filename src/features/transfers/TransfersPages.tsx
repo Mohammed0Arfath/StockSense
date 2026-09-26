@@ -13,6 +13,7 @@ import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { transferService } from '../../services/transferService'
 import { getState } from '../../services/store'
+import { operationTimelineSteps } from '../../utils/operationTimeline'
 
 const statusTitle = (status: string) => status[0].toUpperCase() + status.slice(1)
 
@@ -56,7 +57,8 @@ export const TransferNewPage = () => {
         destinationLocationId: state.locations.find((location) => location.warehouseId === destinationWarehouse?.id && location.status === 'active')?.id ?? '',
       }
     })(),
-    productId: searchParams.get('productId') ?? 'p1', quantity: 1,
+    scheduledDate: new Date().toISOString().slice(0, 10),
+    lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? 'p1', quantity: 1 }],
   }))
   const createMutation = useMutation({
     mutationFn: () => transferService.createTransfer({
@@ -65,28 +67,38 @@ export const TransferNewPage = () => {
       sourceLocationId: form.sourceLocationId,
       destinationWarehouseId: form.destinationWarehouseId,
       destinationLocationId: form.destinationLocationId,
-      scheduledDate: new Date().toISOString(),
+      scheduledDate: new Date(form.scheduledDate).toISOString(),
       status: 'draft',
-      lines: [{ id: `tl-${Date.now()}`, productId: form.productId, quantity: form.quantity }],
+      lines: form.lines,
     }),
     onSuccess: (transfer) => {
       queryClient.invalidateQueries()
       navigate(`/transfers/${transfer.id}`)
     },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Transfer could not be saved.'),
   })
+  const availableFor = (productId: string) => state.stockItems.filter((item) => item.productId === productId && item.warehouseId === form.sourceWarehouseId && item.locationId === form.sourceLocationId).reduce((sum, item) => sum + Math.max(item.onHand - item.reserved, 0), 0)
 
   return (
     <div className="space-y-4">
       <PageHeader title="New Internal Transfer" description="Total stock remains unchanged; only location changes." />
       <Card><CardContent className="grid gap-3 md:grid-cols-2">
-        <Select value={form.sourceWarehouseId} onChange={(e) => setForm((s) => ({ ...s, sourceWarehouseId: e.target.value, sourceLocationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.sourceLocationId} onChange={(e) => setForm((s) => ({ ...s, sourceLocationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.sourceWarehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
-        <Select value={form.destinationWarehouseId} onChange={(e) => setForm((s) => ({ ...s, destinationWarehouseId: e.target.value, destinationLocationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.destinationLocationId} onChange={(e) => setForm((s) => ({ ...s, destinationLocationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.destinationWarehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
-        <Select value={form.productId} onChange={(e) => setForm((s) => ({ ...s, productId: e.target.value }))}>{state.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
-        <Input type="number" value={form.quantity} onChange={(e) => setForm((s) => ({ ...s, quantity: Number(e.target.value) }))} />
+        <Select aria-label="Source warehouse" value={form.sourceWarehouseId} onChange={(e) => setForm((s) => ({ ...s, sourceWarehouseId: e.target.value, sourceLocationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.filter((warehouse) => warehouse.status === 'active').map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select aria-label="Source location" value={form.sourceLocationId} onChange={(e) => setForm((s) => ({ ...s, sourceLocationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.sourceWarehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
+        <Select aria-label="Destination warehouse" value={form.destinationWarehouseId} onChange={(e) => setForm((s) => ({ ...s, destinationWarehouseId: e.target.value, destinationLocationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.filter((warehouse) => warehouse.status === 'active').map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select aria-label="Destination location" value={form.destinationLocationId} onChange={(e) => setForm((s) => ({ ...s, destinationLocationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.destinationWarehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
+        <Input aria-label="Scheduled date" type="date" required value={form.scheduledDate} onChange={(e) => setForm((s) => ({ ...s, scheduledDate: e.target.value }))} />
       </CardContent></Card>
-      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => navigate('/transfers')}>Cancel</Button><Button onClick={() => createMutation.mutate()}>Save Draft</Button></div>
+      <div className="space-y-3">
+        {form.lines.map((line, index) => <Card key={line.id}><CardContent className="grid gap-3 md:grid-cols-4">
+          <Select aria-label={`Product ${index + 1}`} value={line.productId} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, productId: e.target.value } : item) }))}>{state.products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</Select>
+          <Input aria-label="Transfer quantity" type="number" min="0.01" step="any" required value={line.quantity} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, quantity: Number(e.target.value) } : item) }))} />
+          <p className="self-center text-xs text-slate-400">Available at source: {availableFor(line.productId)}</p>
+          <Button type="button" variant="secondary" disabled={form.lines.length === 1} onClick={() => setForm((s) => ({ ...s, lines: s.lines.filter((item) => item.id !== line.id) }))}>Remove line</Button>
+        </CardContent></Card>)}
+        <Button type="button" variant="secondary" onClick={() => setForm((s) => ({ ...s, lines: [...s.lines, { id: crypto.randomUUID(), productId: state.products[0]?.id ?? '', quantity: 1 }] }))}>Add Product Line</Button>
+      </div>
+      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => navigate('/transfers')}>Cancel</Button><Button disabled={createMutation.isPending || !form.lines.length || form.lines.some((line) => !line.productId || line.quantity <= 0) || (form.sourceWarehouseId === form.destinationWarehouseId && form.sourceLocationId === form.destinationLocationId)} onClick={() => createMutation.mutate()}>{createMutation.isPending ? 'Saving…' : 'Save Draft'}</Button></div>
     </div>
   )
 }
@@ -95,6 +107,7 @@ export const TransferDetailPage = () => {
   const { transferId = '' } = useParams()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
   const query = useQuery({ queryKey: ['transfer', transferId], queryFn: () => transferService.getTransfer(transferId) })
   const transfer = query.data
   const state = getState()
@@ -103,21 +116,23 @@ export const TransferDetailPage = () => {
     onSuccess: () => queryClient.invalidateQueries(),
     onError: (error) => toast.error(error instanceof Error ? error.message : 'Transfer could not be validated.'),
   })
+  const cancelMutation = useMutation({
+    mutationFn: () => transferService.cancelTransfer(transferId),
+    onSuccess: () => { void queryClient.invalidateQueries(); toast.success('Transfer canceled.') },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Transfer could not be canceled.'),
+  })
   if (!transfer) return <p className="text-sm text-slate-400">Transfer not found.</p>
-
-  const steps = ['draft', 'waiting', 'ready', 'done']
-  const currentIndex = steps.indexOf(transfer.status)
 
   return (
     <div className="space-y-4">
       <PageHeader title={transfer.transferNumber} description="Internal transfer workflow" />
-      <OperationTimeline steps={steps.map((step, idx) => ({ label: statusTitle(step), active: idx <= currentIndex }))} />
+      <OperationTimeline steps={operationTimelineSteps(transfer.status, transfer.statusHistory)} />
       <DataTable data={transfer.lines} columns={[
         { key: 'product', header: 'Product', render: (line) => state.products.find((p) => p.id === line.productId)?.name },
         { key: 'qty', header: 'Quantity', render: (line) => line.quantity },
       ]} />
       <p className="text-xs text-slate-400">This transfer redistributes stock and does not change total global stock.</p>
-      <div className="flex gap-2"><Button variant="secondary" disabled={transfer.status === 'ready' || transfer.status === 'done' || transfer.status === 'canceled' || advanceMutation.isPending} onClick={() => advanceMutation.mutate()}>Advance Stage</Button><Button disabled={transfer.status !== 'ready' || advanceMutation.isPending} onClick={() => setConfirmOpen(true)}>Validate Transfer</Button></div>
+      <div className="flex gap-2"><Button variant="secondary" disabled={transfer.status === 'ready' || transfer.status === 'done' || transfer.status === 'canceled' || advanceMutation.isPending} onClick={() => advanceMutation.mutate()}>Advance Stage</Button><Button disabled={transfer.status !== 'ready' || advanceMutation.isPending} onClick={() => setConfirmOpen(true)}>Validate Transfer</Button>{transfer.status !== 'done' && transfer.status !== 'canceled' ? <Button variant="destructive" disabled={cancelMutation.isPending} onClick={() => setCancelOpen(true)}>Cancel Transfer</Button> : null}</div>
       <ConfirmDialog
         open={confirmOpen}
         title="Validate Transfer?"
@@ -126,6 +141,7 @@ export const TransferDetailPage = () => {
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => { setConfirmOpen(false); advanceMutation.mutate() }}
       />
+      <ConfirmDialog open={cancelOpen} title="Cancel Transfer?" message="This transfer will be canceled. Inventory will remain unchanged." confirmLabel="Cancel Transfer" onCancel={() => setCancelOpen(false)} onConfirm={() => { setCancelOpen(false); cancelMutation.mutate() }} />
     </div>
   )
 }

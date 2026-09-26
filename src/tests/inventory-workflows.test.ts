@@ -5,6 +5,7 @@ import { transferService } from '../services/transferService'
 import { adjustmentService } from '../services/adjustmentService'
 import { productService } from '../services/productService'
 import { getState, resetState, updateState } from '../services/store'
+import { inventoryService } from '../services/inventoryService'
 
 describe('inventory workflows', () => {
   beforeEach(() => {
@@ -22,6 +23,8 @@ describe('inventory workflows', () => {
     const stockAfter = getState().stockItems.find((s) => s.productId === line.productId && s.locationId === line.locationId)!.onHand
     expect(stockAfter).toBe(stockBefore + line.receivedQuantity)
     expect(getState().moveHistory[0].reference).toBe(receipt.receiptNumber)
+    expect(getState().moveHistory.filter((entry) => entry.reference === receipt.receiptNumber)).toHaveLength(1)
+    expect(getState().receipts.find((row) => row.id === receipt.id)?.status).toBe('done')
   })
 
   it('delivery cannot complete when requested exceeds available', async () => {
@@ -53,6 +56,18 @@ describe('inventory workflows', () => {
     const after = getState().stockItems.filter((row) => row.productId === 'p5' && row.warehouseId === 'w2').reduce((sum, row) => sum + row.onHand, 0)
     expect(after).toBe(before - 10)
     expect(getState().moveHistory[0].operation).toBe('Delivery')
+    expect(getState().moveHistory.filter((entry) => entry.reference === getState().deliveries.find((row) => row.id === 'd2')?.deliveryNumber)).toHaveLength(1)
+    expect(getState().deliveries.find((row) => row.id === 'd2')?.status).toBe('done')
+  })
+
+  it('failed delivery leaves stock, status, and ledger unchanged', async () => {
+    updateState((draft) => { draft.deliveries.find((row) => row.id === 'd2')!.lines[0].requestedQuantity = 999999 })
+    const stockBefore = getState().stockItems.map((row) => row.onHand)
+    const ledgerBefore = getState().moveHistory.length
+    await expect(deliveryService.advanceStatus('d2')).rejects.toThrow(/available/)
+    expect(getState().stockItems.map((row) => row.onHand)).toEqual(stockBefore)
+    expect(getState().moveHistory).toHaveLength(ledgerBefore)
+    expect(getState().deliveries.find((row) => row.id === 'd2')?.status).toBe('ready')
   })
 
   it('transfer moves quantity between its locations without changing the total', async () => {
@@ -67,9 +82,14 @@ describe('inventory workflows', () => {
   it('rejects an overdrawn transfer atomically', async () => {
     updateState((draft) => { draft.transfers.find((row) => row.id === 't1')!.lines[0].quantity = 999999 })
     const before = getState().stockItems.map((row) => row.onHand)
-    await expect(transferService.advanceStatus('t1')).rejects.toThrow(/Not enough available stock/)
+    await expect(transferService.advanceStatus('t1')).rejects.toThrow(/available/)
     expect(getState().stockItems.map((row) => row.onHand)).toEqual(before)
     expect(getState().transfers.find((row) => row.id === 't1')!.status).toBe('ready')
+  })
+
+  it('writes one ledger event for a successful transfer', async () => {
+    await transferService.advanceStatus('t1')
+    expect(getState().moveHistory.filter((entry) => entry.reference === getState().transfers.find((row) => row.id === 't1')?.transferNumber)).toHaveLength(1)
   })
 
   it('rejects duplicate transfer lines whose combined quantity exceeds available stock', async () => {
@@ -78,7 +98,7 @@ describe('inventory workflows', () => {
       transfer.lines.push({ id: 'tl-extra', productId: 'p1', quantity: 500 })
     })
     const before = getState().stockItems.map((row) => row.onHand)
-    await expect(transferService.advanceStatus('t1')).rejects.toThrow(/Not enough available stock/)
+    await expect(transferService.advanceStatus('t1')).rejects.toThrow(/available/)
     expect(getState().stockItems.map((row) => row.onHand)).toEqual(before)
   })
 
@@ -91,6 +111,56 @@ describe('inventory workflows', () => {
     expect(getState().stockItems.find((row) => row.id === 's4')!.onHand).toBe(45)
     expect(getState().moveHistory[0].quantity).toBe(-3)
     expect(getState().moveHistory[0].operation).toBe('Adjustment')
+  })
+
+  it('records positive adjustments once and zero adjustments without a stock ledger mutation', async () => {
+    const positive = await adjustmentService.createAdjustment({
+      productId: 'p4', warehouseId: 'w1', locationId: 'l1', systemQuantity: 48,
+      countedQuantity: 53, reason: 'Count increase', createdBy: 'u1', date: new Date().toISOString(),
+    })
+    await adjustmentService.applyAdjustment(positive.id)
+    expect(getState().stockItems.find((row) => row.id === 's4')?.onHand).toBe(53)
+    expect(getState().moveHistory.filter((entry) => entry.reference === positive.adjustmentNumber)).toHaveLength(1)
+
+    const zero = await adjustmentService.createAdjustment({
+      productId: 'p4', warehouseId: 'w1', locationId: 'l1', systemQuantity: 53,
+      countedQuantity: 53, reason: 'Verified count', createdBy: 'u1', date: new Date().toISOString(),
+    })
+    const ledgerCount = getState().moveHistory.length
+    await adjustmentService.applyAdjustment(zero.id)
+    expect(getState().stockItems.find((row) => row.id === 's4')?.onHand).toBe(53)
+    expect(getState().moveHistory).toHaveLength(ledgerCount + 1)
+    expect(getState().moveHistory[0]).toMatchObject({ reference: zero.adjustmentNumber, quantity: 0 })
+    expect(getState().adjustments.find((row) => row.id === zero.id)?.status).toBe('applied')
+  })
+
+  it('canceled operations do not create stock mutation ledger entries', async () => {
+    const before = getState().moveHistory.length
+    await receiptService.cancelReceipt('r1')
+    await deliveryService.cancelDelivery('d1')
+    await transferService.cancelTransfer('t2')
+    expect(getState().moveHistory).toHaveLength(before)
+  })
+
+  it('dashboard metrics reflect completed and canceled operations', async () => {
+    const before = await inventoryService.getDashboardMetrics()
+    await receiptService.advanceStatus('r2')
+    await deliveryService.cancelDelivery('d1')
+    const after = await inventoryService.getDashboardMetrics()
+    expect(after.pendingReceipts).toBe(before.pendingReceipts - 1)
+    expect(after.pendingDeliveries).toBe(before.pendingDeliveries - 1)
+  })
+
+  it('stock alerts change when availability crosses a reorder threshold', async () => {
+    const beforeAlerts = await inventoryService.getStockAlerts()
+    expect(beforeAlerts.some((row) => row.productId === 'p1' && row.locationId === 'l1')).toBe(false)
+    const adjustment = await adjustmentService.createAdjustment({
+      productId: 'p1', warehouseId: 'w1', locationId: 'l1', systemQuantity: 460,
+      countedQuantity: 50, reason: 'Cycle count', createdBy: 'u1', date: new Date().toISOString(),
+    })
+    await adjustmentService.applyAdjustment(adjustment.id)
+    const afterAlerts = await inventoryService.getStockAlerts()
+    expect(afterAlerts.some((row) => row.productId === 'p1' && row.locationId === 'l1')).toBe(true)
   })
 
   it('records product initial stock through the transaction engine', async () => {

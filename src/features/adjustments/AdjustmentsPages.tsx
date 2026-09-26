@@ -13,6 +13,8 @@ import { Select } from '../../components/ui/select'
 import { Textarea } from '../../components/ui/textarea'
 import { adjustmentService } from '../../services/adjustmentService'
 import { getState } from '../../services/store'
+import { OperationTimeline } from '../../components/shared/operation-timeline'
+import { operationTimelineSteps } from '../../utils/operationTimeline'
 
 export const AdjustmentsPage = () => {
   const query = useQuery({ queryKey: ['adjustments'], queryFn: () => adjustmentService.getAdjustments() })
@@ -98,6 +100,7 @@ export const AdjustmentDetailPage = () => {
   return (
     <div className="space-y-4">
       <PageHeader title={adjustment.adjustmentNumber} description={adjustment.reason} />
+      <OperationTimeline steps={operationTimelineSteps(adjustment.status, adjustment.statusHistory)} />
       <Card><CardContent className="space-y-1 text-sm">
         <p>System Quantity: {adjustment.systemQuantity}</p>
         <p>Counted Quantity: {adjustment.countedQuantity}</p>

@@ -9,7 +9,7 @@ import { ReceiptsPage, ReceiptNewPage, ReceiptDetailPage } from './features/rece
 import { DeliveriesPage, DeliveryNewPage, DeliveryDetailPage } from './features/deliveries/DeliveriesPages'
 import { TransfersPage, TransferNewPage, TransferDetailPage } from './features/transfers/TransfersPages'
 import { AdjustmentsPage, AdjustmentNewPage, AdjustmentDetailPage } from './features/adjustments/AdjustmentsPages'
-import { MoveHistoryPage } from './features/move-history/MoveHistoryPage'
+import { MoveHistoryPage, MoveHistoryDetailPage } from './features/move-history/MoveHistoryPage'
 import { WarehousesPage, WarehouseDetailPage } from './features/warehouses/WarehousesPages'
 import { LocationsPage, LocationDetailPage } from './features/locations/LocationsPages'
 import { ReorderingRulesPage } from './features/reordering-rules/ReorderingRulesPage'
@@ -55,6 +55,7 @@ export default function App() {
           <Route path="/adjustments/:adjustmentId" element={<AdjustmentDetailPage />} />
 
           <Route path="/move-history" element={<MoveHistoryPage />} />
+          <Route path="/move-history/:entryId" element={<MoveHistoryDetailPage />} />
           <Route path="/warehouses" element={<WarehousesPage />} />
           <Route path="/warehouses/:warehouseId" element={<WarehouseDetailPage />} />
           <Route path="/locations" element={<LocationsPage />} />

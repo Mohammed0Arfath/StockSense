@@ -1,5 +1,10 @@
 export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock'
 export type DocumentStatus = 'draft' | 'waiting' | 'ready' | 'done' | 'canceled'
+export type OperationStatus = DocumentStatus | 'applied'
+export interface OperationStatusEvent {
+  status: OperationStatus
+  timestamp: string
+}
 export type AdjustmentStatus = 'draft' | 'applied'
 export type MoveOperation = 'Receipt' | 'Delivery' | 'Internal Transfer' | 'Adjustment'
 export type LocationType = 'storage' | 'production' | 'receiving' | 'dispatch'
@@ -73,6 +78,7 @@ export interface Receipt {
   scheduledDate: string
   reference: string
   status: DocumentStatus
+  statusHistory?: OperationStatusEvent[]
   createdBy: string
   lines: ReceiptLine[]
 }
@@ -90,9 +96,11 @@ export interface Delivery {
   deliveryNumber: string
   customer: string
   sourceWarehouseId: string
+  sourceLocationId: string
   scheduledDate: string
   reference: string
   status: DocumentStatus
+  statusHistory?: OperationStatusEvent[]
   createdBy: string
   lines: DeliveryLine[]
 }
@@ -112,6 +120,7 @@ export interface InternalTransfer {
   destinationLocationId: string
   scheduledDate: string
   status: DocumentStatus
+  statusHistory?: OperationStatusEvent[]
   lines: TransferLine[]
 }
 
@@ -125,6 +134,7 @@ export interface StockAdjustment {
   countedQuantity: number
   reason: string
   status: AdjustmentStatus
+  statusHistory?: OperationStatusEvent[]
   createdBy: string
   date: string
 }
@@ -142,6 +152,11 @@ export interface MoveHistoryEntry {
   quantity: number
   user: string
   status: string
+  documentId?: string
+  sourceWarehouseId?: string
+  sourceLocationId?: string
+  destinationWarehouseId?: string
+  destinationLocationId?: string
 }
 
 export interface ReorderingRule {

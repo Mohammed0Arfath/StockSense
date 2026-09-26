@@ -15,6 +15,7 @@ import { Select } from '../../components/ui/select'
 import { receiptService } from '../../services/receiptService'
 import { getState } from '../../services/store'
 import type { Receipt } from '../../types/domain'
+import { operationTimelineSteps } from '../../utils/operationTimeline'
 
 const statusTitle = (status: string) => status[0].toUpperCase() + status.slice(1)
 
@@ -66,13 +67,17 @@ export const ReceiptNewPage = () => {
   const [searchParams] = useSearchParams()
   const state = getState()
   const queryClient = useQueryClient()
+  const today = new Date().toISOString().slice(0, 10)
   const [form, setForm] = useState(() => {
     const warehouseId = searchParams.get('warehouseId') ?? 'w1'
     const requestedLocation = searchParams.get('locationId')
     const locationId = requestedLocation && state.locations.some((location) => location.id === requestedLocation && location.warehouseId === warehouseId)
       ? requestedLocation
       : state.locations.find((location) => location.warehouseId === warehouseId)?.id ?? ''
-    return { vendor: '', warehouseId, reference: '', productId: searchParams.get('productId') ?? 'p1', quantity: 1, locationId }
+    return {
+      vendor: '', warehouseId, reference: '', scheduledDate: today,
+      lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? 'p1', expectedQuantity: 1, receivedQuantity: 1, locationId }],
+    }
   })
   const createMutation = useMutation({
     mutationFn: () =>
@@ -80,11 +85,14 @@ export const ReceiptNewPage = () => {
         receiptNumber: `REC-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999)).padStart(3, '0')}`,
         vendor: form.vendor || 'Unknown Vendor',
         warehouseId: form.warehouseId,
-        scheduledDate: new Date().toISOString(),
+        scheduledDate: new Date(form.scheduledDate).toISOString(),
         reference: form.reference,
         status: 'draft',
         createdBy: 'u1',
-        lines: [{ id: `rl-${Date.now()}`, productId: form.productId, expectedQuantity: form.quantity, receivedQuantity: form.quantity, unit: 'pcs', locationId: form.locationId }],
+        lines: form.lines.map((line) => ({
+          ...line,
+          unit: state.products.find((product) => product.id === line.productId)?.unit ?? 'pcs',
+        })),
       }),
     onSuccess: (receipt) => {
       queryClient.invalidateQueries()
@@ -97,14 +105,22 @@ export const ReceiptNewPage = () => {
       <PageHeader title="New Receipt" description="Draft → Waiting → Ready → Done" />
       <OperationTimeline steps={[{ label: 'Draft', active: true }, { label: 'Waiting', active: false }, { label: 'Ready', active: false }, { label: 'Done', active: false }]} />
       <Card><CardContent className="grid gap-3 md:grid-cols-2">
-        <Input placeholder="Vendor" value={form.vendor} onChange={(e) => setForm((s) => ({ ...s, vendor: e.target.value }))} />
-        <Input placeholder="Reference" value={form.reference} onChange={(e) => setForm((s) => ({ ...s, reference: e.target.value }))} />
-        <Select value={form.warehouseId} onChange={(e) => setForm((s) => ({ ...s, warehouseId: e.target.value, locationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.locationId} onChange={(e) => setForm((s) => ({ ...s, locationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.warehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
-        <Select value={form.productId} onChange={(e) => setForm((s) => ({ ...s, productId: e.target.value }))}>{state.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
-        <Input type="number" value={form.quantity} onChange={(e) => setForm((s) => ({ ...s, quantity: Number(e.target.value) }))} />
+        <Input aria-label="Vendor" placeholder="Vendor" required value={form.vendor} onChange={(e) => setForm((s) => ({ ...s, vendor: e.target.value }))} />
+        <Input aria-label="Reference" placeholder="Reference" value={form.reference} onChange={(e) => setForm((s) => ({ ...s, reference: e.target.value }))} />
+        <label className="grid gap-1 text-xs text-slate-400">Scheduled Date<Input type="date" required value={form.scheduledDate} onChange={(e) => setForm((s) => ({ ...s, scheduledDate: e.target.value }))} /></label>
+        <Select aria-label="Warehouse" required value={form.warehouseId} onChange={(e) => setForm((s) => ({ ...s, warehouseId: e.target.value, lines: s.lines.map((line) => ({ ...line, locationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' })) }))}>{state.warehouses.filter((warehouse) => warehouse.status === 'active').map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
       </CardContent></Card>
-      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => navigate('/receipts')}>Cancel</Button><Button onClick={() => createMutation.mutate()}>Save Draft</Button></div>
+      <div className="space-y-3">
+        {form.lines.map((line, index) => <Card key={line.id}><CardContent className="grid gap-3 md:grid-cols-5">
+          <Select aria-label={`Product ${index + 1}`} required value={line.productId} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, productId: e.target.value } : item) }))}>{state.products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</Select>
+          <Input aria-label="Expected quantity" type="number" min="0.01" step="any" required placeholder="Expected Qty" value={line.expectedQuantity} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, expectedQuantity: Number(e.target.value) } : item) }))} />
+          <Input aria-label="Received quantity" type="number" min="0.01" step="any" required placeholder="Received Qty" value={line.receivedQuantity} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, receivedQuantity: Number(e.target.value) } : item) }))} />
+          <Select aria-label="Destination location" required value={line.locationId} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, locationId: e.target.value } : item) }))}>{state.locations.filter((location) => location.warehouseId === form.warehouseId && location.status === 'active').map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</Select>
+          <Button type="button" variant="secondary" disabled={form.lines.length === 1} onClick={() => setForm((s) => ({ ...s, lines: s.lines.filter((item) => item.id !== line.id) }))}>Remove line</Button>
+        </CardContent></Card>)}
+        <Button type="button" variant="secondary" onClick={() => setForm((s) => ({ ...s, lines: [...s.lines, { id: crypto.randomUUID(), productId: state.products[0]?.id ?? '', expectedQuantity: 1, receivedQuantity: 1, locationId: state.locations.find((location) => location.warehouseId === s.warehouseId && location.status === 'active')?.id ?? '' }] }))}>Add Product Line</Button>
+      </div>
+      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => navigate('/receipts')}>Cancel</Button><Button disabled={createMutation.isPending || !form.vendor.trim() || !form.lines.length || form.lines.some((line) => !line.productId || !line.locationId || line.expectedQuantity <= 0 || line.receivedQuantity <= 0)} onClick={() => createMutation.mutate()}>{createMutation.isPending ? 'Saving…' : 'Save Draft'}</Button></div>
     </div>
   )
 }
@@ -114,6 +130,7 @@ export const ReceiptDetailPage = () => {
   const queryClient = useQueryClient()
   const state = getState()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
 
   const query = useQuery({ queryKey: ['receipt', receiptId], queryFn: () => receiptService.getReceipt(receiptId) })
   const advanceMutation = useMutation({
@@ -121,16 +138,19 @@ export const ReceiptDetailPage = () => {
     onSuccess: () => queryClient.invalidateQueries(),
     onError: (error) => toast.error(error instanceof Error ? error.message : 'Receipt could not be validated.'),
   })
+  const cancelMutation = useMutation({
+    mutationFn: () => receiptService.cancelReceipt(receiptId),
+    onSuccess: () => { void queryClient.invalidateQueries(); toast.success('Receipt canceled.') },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Receipt could not be canceled.'),
+  })
   const receipt = query.data as Receipt | null
   if (!receipt) return <p className="text-sm text-slate-400">Receipt not found.</p>
-
-  const steps = ['draft', 'waiting', 'ready', 'done']
-  const currentIndex = steps.indexOf(receipt.status)
 
   return (
     <div className="space-y-4">
       <PageHeader title={receipt.receiptNumber} description={`${receipt.vendor} · ${new Date(receipt.scheduledDate).toLocaleDateString()}`} />
-      <OperationTimeline steps={steps.map((step, idx) => ({ label: statusTitle(step), active: idx <= currentIndex }))} />
+      <OperationTimeline steps={operationTimelineSteps(receipt.status, receipt.statusHistory)} />
+      <p className="text-sm text-slate-400">Destination warehouse: {state.warehouses.find((row) => row.id === receipt.warehouseId)?.name}</p>
       <DataTable data={receipt.lines} columns={[
         { key: 'product', header: 'Product', render: (line) => state.products.find((p) => p.id === line.productId)?.name },
         { key: 'sku', header: 'SKU', render: (line) => state.products.find((p) => p.id === line.productId)?.sku },
@@ -143,6 +163,7 @@ export const ReceiptDetailPage = () => {
         <StatusBadge status={statusTitle(receipt.status)} />
         <Button variant="secondary" disabled={receipt.status === 'ready' || receipt.status === 'done' || receipt.status === 'canceled' || advanceMutation.isPending} onClick={() => advanceMutation.mutate()}>Advance Stage</Button>
         <Button onClick={() => setConfirmOpen(true)} disabled={receipt.status !== 'ready' || advanceMutation.isPending}>Validate Receipt</Button>
+        <Button variant="destructive" disabled={receipt.status === 'done' || receipt.status === 'canceled' || cancelMutation.isPending} onClick={() => setCancelOpen(true)}>Cancel Receipt</Button>
       </div>
       <ConfirmDialog
         open={confirmOpen}
@@ -160,6 +181,7 @@ export const ReceiptDetailPage = () => {
           advanceMutation.mutate()
         }}
       />
+      <ConfirmDialog open={cancelOpen} title="Cancel Receipt?" message="This receipt will be canceled. No stock will be received." confirmLabel="Cancel Receipt" onCancel={() => setCancelOpen(false)} onConfirm={() => { setCancelOpen(false); cancelMutation.mutate() }} />
     </div>
   )
 }

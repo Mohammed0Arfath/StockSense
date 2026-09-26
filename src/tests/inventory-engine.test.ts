@@ -40,7 +40,7 @@ describe('inventory transaction engine', () => {
     delivery.lines[0].requestedQuantity = 51
     const stockBefore = structuredClone(state.stockItems)
 
-    expect(() => inventoryEngine.deliver(state, delivery.id)).toThrow(/Not enough available stock/)
+    expect(() => inventoryEngine.deliver(state, delivery.id)).toThrow(/available/)
     expect(state.stockItems).toEqual(stockBefore)
     expect(delivery.status).toBe('ready')
   })

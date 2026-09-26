@@ -1,4 +1,3 @@
-import { wait } from './store'
 import { inventoryEngine } from './inventoryEngine'
 import { inventoryRepository } from './inventoryRepository'
 import { createId } from './ids'
@@ -6,18 +5,15 @@ import type { Delivery } from '../types/domain'
 
 export const deliveryService = {
   async getDeliveries() {
-    await wait()
     return inventoryRepository.snapshot().deliveries
   },
 
   async getDelivery(deliveryId: string) {
-    await wait(120)
     return inventoryRepository.snapshot().deliveries.find((delivery) => delivery.id === deliveryId) ?? null
   },
 
   async createDelivery(payload: Omit<Delivery, 'id'>) {
-    await wait()
-    const delivery = { ...payload, id: createId('delivery') }
+    const delivery = { ...payload, id: createId('delivery'), statusHistory: payload.statusHistory ?? [{ status: 'draft' as const, timestamp: new Date().toISOString() }] }
     inventoryRepository.transact((draft) => draft.deliveries.unshift(delivery))
     return delivery
   },
@@ -27,7 +23,18 @@ export const deliveryService = {
   },
 
   async advanceStatus(deliveryId: string) {
-    await wait(120)
     return inventoryRepository.transact((draft) => inventoryEngine.advanceDelivery(draft, deliveryId))
+  },
+
+  async pickDelivery(deliveryId: string) {
+    return inventoryRepository.transact((draft) => inventoryEngine.pickDelivery(draft, deliveryId))
+  },
+
+  async packDelivery(deliveryId: string) {
+    return inventoryRepository.transact((draft) => inventoryEngine.packDelivery(draft, deliveryId))
+  },
+
+  async cancelDelivery(deliveryId: string) {
+    return inventoryRepository.transact((draft) => inventoryEngine.cancelDelivery(draft, deliveryId))
   },
 }

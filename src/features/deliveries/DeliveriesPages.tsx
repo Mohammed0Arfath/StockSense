@@ -14,6 +14,7 @@ import { Input } from '../../components/ui/input'
 import { Select } from '../../components/ui/select'
 import { deliveryService } from '../../services/deliveryService'
 import { getState } from '../../services/store'
+import { operationTimelineSteps } from '../../utils/operationTimeline'
 
 const statusTitle = (status: string) => status[0].toUpperCase() + status.slice(1)
 
@@ -57,23 +58,31 @@ export const DeliveryNewPage = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const [form, setForm] = useState(() => ({
-    customer: '', sourceWarehouseId: searchParams.get('warehouseId') ?? 'w1', reference: '',
-    productId: searchParams.get('productId') ?? 'p1', quantity: 1,
-  }))
-  const available = state.stockItems.filter((item) => item.productId === form.productId && item.warehouseId === form.sourceWarehouseId).reduce((sum, row) => sum + Math.max(row.onHand - row.reserved, 0), 0)
+  const [form, setForm] = useState(() => {
+    const sourceWarehouseId = searchParams.get('warehouseId') ?? 'w1'
+    const requestedLocation = searchParams.get('locationId')
+    const sourceLocationId = requestedLocation && state.locations.some((location) => location.id === requestedLocation && location.warehouseId === sourceWarehouseId)
+      ? requestedLocation
+      : state.locations.find((location) => location.warehouseId === sourceWarehouseId && location.status === 'active')?.id ?? ''
+    return {
+      customer: '', sourceWarehouseId, sourceLocationId, reference: '', scheduledDate: new Date().toISOString().slice(0, 10),
+      lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? 'p1', requestedQuantity: 1 }],
+    }
+  })
+  const availableFor = (productId: string) => state.stockItems.filter((item) => item.productId === productId && item.warehouseId === form.sourceWarehouseId && item.locationId === form.sourceLocationId).reduce((sum, row) => sum + Math.max(row.onHand - row.reserved, 0), 0)
 
   const createMutation = useMutation({
     mutationFn: () =>
       deliveryService.createDelivery({
         deliveryNumber: `DEL-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999)).padStart(3, '0')}`,
-        customer: form.customer || 'Unknown Customer',
+        customer: form.customer,
         sourceWarehouseId: form.sourceWarehouseId,
-        scheduledDate: new Date().toISOString(),
+        scheduledDate: new Date(form.scheduledDate).toISOString(),
         reference: form.reference,
         status: 'draft',
         createdBy: 'u1',
-        lines: [{ id: `dl-${Date.now()}`, productId: form.productId, requestedQuantity: form.quantity, pickedQuantity: 0, packedQuantity: 0 }],
+        sourceLocationId: form.sourceLocationId,
+        lines: form.lines.map((line) => ({ ...line, pickedQuantity: 0, packedQuantity: 0 })),
       }),
     onSuccess: (delivery) => {
       queryClient.invalidateQueries()
@@ -85,14 +94,22 @@ export const DeliveryNewPage = () => {
     <div className="space-y-4">
       <PageHeader title="New Delivery" description="Draft → Waiting → Ready → Done" />
       <Card><CardContent className="grid gap-3 md:grid-cols-2">
-        <Input placeholder="Customer" value={form.customer} onChange={(e) => setForm((s) => ({ ...s, customer: e.target.value }))} />
+        <Input placeholder="Customer" required value={form.customer} onChange={(e) => setForm((s) => ({ ...s, customer: e.target.value }))} />
         <Input placeholder="Reference" value={form.reference} onChange={(e) => setForm((s) => ({ ...s, reference: e.target.value }))} />
-        <Select value={form.sourceWarehouseId} onChange={(e) => setForm((s) => ({ ...s, sourceWarehouseId: e.target.value }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.productId} onChange={(e) => setForm((s) => ({ ...s, productId: e.target.value }))}>{state.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
-        <Input type="number" value={form.quantity} onChange={(e) => setForm((s) => ({ ...s, quantity: Number(e.target.value) }))} max={available} />
-        <p className="text-xs text-slate-400">Available quantity: {available}</p>
+        <Input aria-label="Scheduled date" type="date" required value={form.scheduledDate} onChange={(e) => setForm((s) => ({ ...s, scheduledDate: e.target.value }))} />
+        <Select aria-label="Source warehouse" value={form.sourceWarehouseId} onChange={(e) => setForm((s) => ({ ...s, sourceWarehouseId: e.target.value, sourceLocationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.filter((warehouse) => warehouse.status === 'active').map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select aria-label="Source location" value={form.sourceLocationId} onChange={(e) => setForm((s) => ({ ...s, sourceLocationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.sourceWarehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
       </CardContent></Card>
-      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => navigate('/deliveries')}>Cancel</Button><Button disabled={form.quantity > available} onClick={() => createMutation.mutate()}>Save Draft</Button></div>
+      <div className="space-y-3">
+        {form.lines.map((line, index) => <Card key={line.id}><CardContent className="grid gap-3 md:grid-cols-4">
+          <Select aria-label={`Product ${index + 1}`} value={line.productId} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, productId: e.target.value } : item) }))}>{state.products.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</Select>
+          <Input aria-label="Requested quantity" type="number" min="0.01" step="any" required value={line.requestedQuantity} onChange={(e) => setForm((s) => ({ ...s, lines: s.lines.map((item) => item.id === line.id ? { ...item, requestedQuantity: Number(e.target.value) } : item) }))} />
+          <p className="self-center text-xs text-slate-400">Available at location: {availableFor(line.productId)}</p>
+          <Button type="button" variant="secondary" disabled={form.lines.length === 1} onClick={() => setForm((s) => ({ ...s, lines: s.lines.filter((item) => item.id !== line.id) }))}>Remove line</Button>
+        </CardContent></Card>)}
+        <Button type="button" variant="secondary" onClick={() => setForm((s) => ({ ...s, lines: [...s.lines, { id: crypto.randomUUID(), productId: state.products[0]?.id ?? '', requestedQuantity: 1 }] }))}>Add Product Line</Button>
+      </div>
+      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => navigate('/deliveries')}>Cancel</Button><Button disabled={createMutation.isPending || !form.customer.trim() || !form.lines.length || form.lines.some((line) => !line.productId || line.requestedQuantity <= 0)} onClick={() => createMutation.mutate()}>{createMutation.isPending ? 'Saving…' : 'Save Draft'}</Button></div>
     </div>
   )
 }
@@ -101,36 +118,54 @@ export const DeliveryDetailPage = () => {
   const { deliveryId = '' } = useParams()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
   const state = getState()
   const query = useQuery({ queryKey: ['delivery', deliveryId], queryFn: () => deliveryService.getDelivery(deliveryId) })
   const delivery = query.data
   const canFulfillQuery = useQuery({ queryKey: ['delivery-fulfill', deliveryId], queryFn: () => deliveryService.canFulfillDelivery(deliveryId) })
-  const advanceMutation = useMutation({
-    mutationFn: () => deliveryService.advanceStatus(deliveryId),
+  const pickMutation = useMutation({
+    mutationFn: () => deliveryService.pickDelivery(deliveryId),
     onSuccess: () => queryClient.invalidateQueries(),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Delivery could not be picked.'),
+  })
+  const packMutation = useMutation({
+    mutationFn: () => deliveryService.packDelivery(deliveryId),
+    onSuccess: () => queryClient.invalidateQueries(),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Delivery could not be packed.'),
+  })
+  const validateMutation = useMutation({
+    mutationFn: () => deliveryService.advanceStatus(deliveryId),
+    onSuccess: () => { void queryClient.invalidateQueries(); toast.success('Delivery validated.') },
     onError: (error) => toast.error(error instanceof Error ? error.message : 'Delivery could not be validated.'),
+  })
+  const cancelMutation = useMutation({
+    mutationFn: () => deliveryService.cancelDelivery(deliveryId),
+    onSuccess: () => { void queryClient.invalidateQueries(); toast.success('Delivery canceled.') },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Delivery could not be canceled.'),
   })
   if (!delivery) return <p className="text-sm text-slate-400">Delivery not found.</p>
 
-  const steps = ['draft', 'waiting', 'ready', 'done']
-  const currentIndex = steps.indexOf(delivery.status)
+  const steps = operationTimelineSteps(delivery.status, delivery.statusHistory)
 
   return (
     <div className="space-y-4">
       <PageHeader title={delivery.deliveryNumber} description={`${delivery.customer} · ${new Date(delivery.scheduledDate).toLocaleDateString()}`} />
-      <OperationTimeline steps={steps.map((step, idx) => ({ label: statusTitle(step), active: idx <= currentIndex }))} />
+      <OperationTimeline steps={steps} />
+      <p className="text-sm text-slate-400">Source: {state.warehouses.find((row) => row.id === delivery.sourceWarehouseId)?.name} / {state.locations.find((row) => row.id === delivery.sourceLocationId)?.name}</p>
       <DataTable data={delivery.lines} columns={[
         { key: 'product', header: 'Product', render: (line) => state.products.find((p) => p.id === line.productId)?.name },
-        { key: 'available', header: 'Available Quantity', render: (line) => state.stockItems.filter((item) => item.productId === line.productId && item.warehouseId === delivery.sourceWarehouseId).reduce((sum, item) => sum + Math.max(item.onHand - item.reserved, 0), 0) },
+        { key: 'available', header: 'Available Quantity', render: (line) => state.stockItems.filter((item) => item.productId === line.productId && item.warehouseId === delivery.sourceWarehouseId && item.locationId === delivery.sourceLocationId).reduce((sum, item) => sum + Math.max(item.onHand - item.reserved, 0), 0) },
         { key: 'requested', header: 'Requested Quantity', render: (line) => line.requestedQuantity },
         { key: 'picked', header: 'Picked', render: (line) => line.pickedQuantity },
         { key: 'packed', header: 'Packed', render: (line) => line.packedQuantity },
       ]} />
-      {!canFulfillQuery.data ? <p className="text-sm text-red-300">Requested quantity exceeds available stock.</p> : null}
+      {delivery.status !== 'done' && delivery.status !== 'canceled' && !canFulfillQuery.data ? <p className="text-sm text-red-300">Requested quantities exceed available stock in the source location.</p> : null}
       <div className="flex gap-2">
         <StatusBadge status={statusTitle(delivery.status)} />
-        <Button variant="secondary" disabled={delivery.status === 'ready' || delivery.status === 'done' || delivery.status === 'canceled' || advanceMutation.isPending} onClick={() => advanceMutation.mutate()}>Pick / Pack / Advance</Button>
-        <Button disabled={!canFulfillQuery.data || delivery.status !== 'ready' || advanceMutation.isPending} onClick={() => setConfirmOpen(true)}>Validate Delivery</Button>
+        {delivery.status === 'draft' ? <Button variant="secondary" disabled={!canFulfillQuery.data || pickMutation.isPending} onClick={() => pickMutation.mutate()}>Pick Items</Button> : null}
+        {delivery.status === 'waiting' ? <Button variant="secondary" disabled={packMutation.isPending} onClick={() => packMutation.mutate()}>Pack Items</Button> : null}
+        <Button disabled={!canFulfillQuery.data || delivery.status !== 'ready' || validateMutation.isPending} onClick={() => setConfirmOpen(true)}>Validate Delivery</Button>
+        {delivery.status !== 'done' && delivery.status !== 'canceled' ? <Button variant="destructive" disabled={cancelMutation.isPending} onClick={() => setCancelOpen(true)}>Cancel Delivery</Button> : null}
       </div>
       <ConfirmDialog
         open={confirmOpen}
@@ -138,15 +173,17 @@ export const DeliveryDetailPage = () => {
         message={delivery.lines.map((line) => {
           const product = state.products.find((row) => row.id === line.productId)
           const warehouse = state.warehouses.find((row) => row.id === delivery.sourceWarehouseId)
-          return `${line.requestedQuantity} ${product?.unit ?? ''} of ${product?.name ?? 'product'} will be deducted from ${warehouse?.name ?? 'warehouse'}.`
+          const location = state.locations.find((row) => row.id === delivery.sourceLocationId)
+          return `${line.requestedQuantity} ${product?.unit ?? ''} of ${product?.name ?? 'product'} will be deducted from ${warehouse?.name ?? 'warehouse'} / ${location?.name ?? 'location'}.`
         }).join(' ')}
         confirmLabel="Validate Delivery"
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => {
           setConfirmOpen(false)
-          advanceMutation.mutate()
+          validateMutation.mutate()
         }}
       />
+      <ConfirmDialog open={cancelOpen} title="Cancel Delivery?" message="This delivery will be canceled. No stock will be delivered." confirmLabel="Cancel Delivery" onCancel={() => setCancelOpen(false)} onConfirm={() => { setCancelOpen(false); cancelMutation.mutate() }} />
     </div>
   )
 }

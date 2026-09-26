@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
+import { EmptyState, ErrorState, LoadingState } from '../../components/shared/states'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { FilterDropdown, SearchBar } from '../../components/shared/filters'
 import { OperationTimeline } from '../../components/shared/operation-timeline'
@@ -19,6 +20,7 @@ import { operationTimelineSteps } from '../../utils/operationTimeline'
 const statusTitle = (status: string) => status[0].toUpperCase() + status.slice(1)
 
 export const DeliveriesPage = () => {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const query = useQuery({ queryKey: ['deliveries'], queryFn: () => deliveryService.getDeliveries() })
@@ -35,9 +37,9 @@ export const DeliveriesPage = () => {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Deliveries" description="Outgoing stock workflow" actionLabel="New Delivery" onAction={() => (window.location.href = '/deliveries/new')} />
+      <PageHeader title="Deliveries" description="Outgoing stock workflow" actionLabel="New Delivery" onAction={() => navigate('/deliveries/new')} />
       <div className="grid gap-2 md:grid-cols-2"><SearchBar value={search} onChange={setSearch} /><FilterDropdown value={status} onChange={setStatus} options={[{ label: 'All Statuses', value: 'all' }, { label: 'Draft', value: 'draft' }, { label: 'Waiting', value: 'waiting' }, { label: 'Ready', value: 'ready' }, { label: 'Done', value: 'done' }, { label: 'Canceled', value: 'canceled' }]} /></div>
-      <DataTable
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message="Deliveries could not be loaded. Please try again." /> : filtered.length === 0 ? <EmptyState title={query.data?.length ? 'No matching deliveries' : 'No deliveries yet'} message="Create a delivery to record outgoing stock." /> : <DataTable
         data={filtered}
         columns={[
           { key: 'number', header: 'Delivery Number', render: (row) => <Link className="text-sky-300" to={`/deliveries/${row.id}`}>{row.deliveryNumber}</Link> },
@@ -48,7 +50,7 @@ export const DeliveriesPage = () => {
           { key: 'qty', header: 'Quantity', render: (row) => row.lines.reduce((sum, line) => sum + line.requestedQuantity, 0) },
           { key: 'status', header: 'Status', render: (row) => <StatusBadge status={statusTitle(row.status)} /> },
         ]}
-      />
+      />}
     </div>
   )
 }
@@ -59,14 +61,14 @@ export const DeliveryNewPage = () => {
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [form, setForm] = useState(() => {
-    const sourceWarehouseId = searchParams.get('warehouseId') ?? 'w1'
+    const sourceWarehouseId = searchParams.get('warehouseId') ?? state.warehouses.find((row) => row.status === 'active')?.id ?? ''
     const requestedLocation = searchParams.get('locationId')
     const sourceLocationId = requestedLocation && state.locations.some((location) => location.id === requestedLocation && location.warehouseId === sourceWarehouseId)
       ? requestedLocation
       : state.locations.find((location) => location.warehouseId === sourceWarehouseId && location.status === 'active')?.id ?? ''
     return {
       customer: '', sourceWarehouseId, sourceLocationId, reference: '', scheduledDate: new Date().toISOString().slice(0, 10),
-      lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? 'p1', requestedQuantity: 1 }],
+      lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? state.products[0]?.id ?? '', requestedQuantity: 1 }],
     }
   })
   const availableFor = (productId: string) => state.stockItems.filter((item) => item.productId === productId && item.warehouseId === form.sourceWarehouseId && item.locationId === form.sourceLocationId).reduce((sum, row) => sum + Math.max(row.onHand - row.reserved, 0), 0)
@@ -88,6 +90,7 @@ export const DeliveryNewPage = () => {
       queryClient.invalidateQueries()
       navigate(`/deliveries/${delivery.id}`)
     },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Delivery could not be saved.'),
   })
 
   return (

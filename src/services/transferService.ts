@@ -14,15 +14,14 @@ export const transferService = {
 
   async createTransfer(payload: Omit<InternalTransfer, 'id'>) {
     const transfer = { ...payload, id: createId('transfer'), statusHistory: payload.statusHistory ?? [{ status: 'draft' as const, timestamp: new Date().toISOString() }] }
-    inventoryRepository.transact((draft) => draft.transfers.unshift(transfer))
-    return transfer
+    return inventoryEngine.createTransfer(transfer)
   },
 
   async advanceStatus(transferId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.advanceTransfer(draft, transferId))
+    return inventoryEngine.advanceTransfer(transferId)
   },
 
   async cancelTransfer(transferId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.cancelTransfer(draft, transferId))
+    return inventoryEngine.cancelTransfer(transferId)
   },
 }

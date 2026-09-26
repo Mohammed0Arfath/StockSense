@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
+import { EmptyState, ErrorState, LoadingState } from '../../components/shared/states'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { PageHeader } from '../../components/shared/page-header'
 import { StatusBadge } from '../../components/shared/status-badge'
@@ -17,12 +18,13 @@ import { OperationTimeline } from '../../components/shared/operation-timeline'
 import { operationTimelineSteps } from '../../utils/operationTimeline'
 
 export const AdjustmentsPage = () => {
+  const navigate = useNavigate()
   const query = useQuery({ queryKey: ['adjustments'], queryFn: () => adjustmentService.getAdjustments() })
   const state = getState()
   return (
     <div className="space-y-4">
-      <PageHeader title="Stock Adjustments" description="Reconcile system quantities with physical counts" actionLabel="New Adjustment" onAction={() => (window.location.href = '/adjustments/new')} />
-      <DataTable data={query.data ?? []} columns={[
+      <PageHeader title="Stock Adjustments" description="Reconcile system quantities with physical counts" actionLabel="New Adjustment" onAction={() => navigate('/adjustments/new')} />
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message="Adjustments could not be loaded. Please try again." /> : !query.data?.length ? <EmptyState title="No adjustments yet" message="Create an adjustment to reconcile a physical count." /> : <DataTable data={query.data} columns={[
         { key: 'id', header: 'Adjustment ID', render: (row) => <Link className="text-sky-300" to={`/adjustments/${row.id}`}>{row.adjustmentNumber}</Link> },
         { key: 'product', header: 'Product', render: (row) => state.products.find((p) => p.id === row.productId)?.name },
         { key: 'location', header: 'Location', render: (row) => state.locations.find((l) => l.id === row.locationId)?.name },
@@ -31,7 +33,7 @@ export const AdjustmentsPage = () => {
         { key: 'difference', header: 'Difference', render: (row) => row.countedQuantity - row.systemQuantity },
         { key: 'reason', header: 'Reason', render: (row) => row.reason },
         { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status === 'applied' ? 'Applied' : 'Draft'} /> },
-      ]} />
+      ]} />}
     </div>
   )
 }
@@ -42,9 +44,9 @@ export const AdjustmentNewPage = () => {
   const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [form, setForm] = useState(() => ({
-    productId: searchParams.get('productId') ?? 'p1',
-    warehouseId: searchParams.get('warehouseId') ?? 'w1',
-    locationId: searchParams.get('locationId') ?? 'l1', countedQuantity: 0, reason: '',
+    productId: searchParams.get('productId') ?? state.products[0]?.id ?? '',
+    warehouseId: searchParams.get('warehouseId') ?? state.warehouses.find((row) => row.status === 'active')?.id ?? '',
+    locationId: searchParams.get('locationId') ?? state.locations.find((row) => row.status === 'active')?.id ?? '', countedQuantity: 0, reason: '',
   }))
   const currentSystemQuantity = state.stockItems.find((s) => s.productId === form.productId && s.warehouseId === form.warehouseId && s.locationId === form.locationId)?.onHand ?? 0
   const difference = form.countedQuantity - currentSystemQuantity
@@ -64,6 +66,7 @@ export const AdjustmentNewPage = () => {
       queryClient.invalidateQueries()
       navigate(`/adjustments/${adjustment.id}`)
     },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Adjustment could not be saved.'),
   })
 
   return (

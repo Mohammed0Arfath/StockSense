@@ -14,8 +14,7 @@ export const deliveryService = {
 
   async createDelivery(payload: Omit<Delivery, 'id'>) {
     const delivery = { ...payload, id: createId('delivery'), statusHistory: payload.statusHistory ?? [{ status: 'draft' as const, timestamp: new Date().toISOString() }] }
-    inventoryRepository.transact((draft) => draft.deliveries.unshift(delivery))
-    return delivery
+    return inventoryEngine.createDelivery(delivery)
   },
 
   async canFulfillDelivery(deliveryId: string) {
@@ -23,18 +22,18 @@ export const deliveryService = {
   },
 
   async advanceStatus(deliveryId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.advanceDelivery(draft, deliveryId))
+    return inventoryEngine.advanceDelivery(deliveryId)
   },
 
   async pickDelivery(deliveryId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.pickDelivery(draft, deliveryId))
+    return inventoryEngine.pickDelivery(deliveryId)
   },
 
   async packDelivery(deliveryId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.packDelivery(draft, deliveryId))
+    return inventoryEngine.packDelivery(deliveryId)
   },
 
   async cancelDelivery(deliveryId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.cancelDelivery(draft, deliveryId))
+    return inventoryEngine.cancelDelivery(deliveryId)
   },
 }

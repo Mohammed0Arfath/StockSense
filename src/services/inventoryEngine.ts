@@ -1,6 +1,7 @@
 import type { Delivery, DocumentStatus, InternalTransfer, InventoryState, OperationStatus, Receipt, StockItem } from '../types/domain'
 import { getUserName, getWarehouseName } from './helpers'
 import { createId } from './ids'
+import { inventoryRepository, isPersistentInventory } from './inventoryRepository'
 
 export class InventoryOperationError extends Error {
   constructor(message: string) {
@@ -119,7 +120,7 @@ const addLedgerEntry = (state: InventoryState, entry: Omit<InventoryState['moveH
   state.moveHistory.unshift({ ...entry, id: createId('move'), timestamp: new Date().toISOString() })
 }
 
-export const inventoryEngine = {
+const domainInventoryEngine = {
   initializeProductStock(state: InventoryState, productId: string, quantity: number, userId: string) {
     const product = requireProduct(state, productId)
     requireQuantity(quantity, 'Initial quantity')
@@ -350,5 +351,124 @@ export const inventoryEngine = {
     const locationLabel = `${getWarehouseName(adjustment.warehouseId)} / ${location.name}`
     addLedgerEntry(state, { reference: adjustment.adjustmentNumber, operation: 'Adjustment', productId: product.id, sku: product.sku, source: locationLabel, destination: locationLabel, quantity: difference, user: getUserName(adjustment.createdBy), status: 'Applied', documentId: adjustment.id, sourceWarehouseId: adjustment.warehouseId, sourceLocationId: location.id, destinationWarehouseId: adjustment.warehouseId, destinationLocationId: location.id })
     recordStatus(adjustment, 'applied')
+  },
+}
+
+/** Application mutation boundary. Production writes always go through this engine before persistence. */
+export const inventoryEngine = {
+  ...domainInventoryEngine,
+
+  async createReceipt(receipt: Receipt) {
+    if (isPersistentInventory) await inventoryRepository.createReceipt(receipt as unknown as Record<string, unknown>)
+    else inventoryRepository.transact((draft) => draft.receipts.unshift(receipt))
+    return inventoryRepository.snapshot().receipts.find((row) => row.id === receipt.id) ?? receipt
+  },
+  async createDelivery(delivery: Delivery) {
+    if (isPersistentInventory) await inventoryRepository.createDelivery(delivery as unknown as Record<string, unknown>)
+    else inventoryRepository.transact((draft) => draft.deliveries.unshift(delivery))
+    return inventoryRepository.snapshot().deliveries.find((row) => row.id === delivery.id) ?? delivery
+  },
+  async createTransfer(transfer: InternalTransfer) {
+    if (isPersistentInventory) await inventoryRepository.createTransfer(transfer as unknown as Record<string, unknown>)
+    else inventoryRepository.transact((draft) => draft.transfers.unshift(transfer))
+    return inventoryRepository.snapshot().transfers.find((row) => row.id === transfer.id) ?? transfer
+  },
+  async createAdjustment(adjustment: InventoryState['adjustments'][number]) {
+    if (isPersistentInventory) await inventoryRepository.createAdjustment(adjustment as unknown as Record<string, unknown>)
+    else inventoryRepository.transact((draft) => draft.adjustments.unshift(adjustment))
+    return inventoryRepository.snapshot().adjustments.find((row) => row.id === adjustment.id) ?? adjustment
+  },
+  async createProduct(product: InventoryState['products'][number], initialStock: number) {
+    if (isPersistentInventory) await inventoryRepository.createProduct({ ...product, initialStock })
+    else inventoryRepository.transact((draft) => {
+      draft.products.unshift(product)
+      domainInventoryEngine.initializeProductStock(draft, product.id, initialStock, 'u1')
+    })
+    return inventoryRepository.snapshot().products.find((row) => row.id === product.id) ?? product
+  },
+  async updateProduct(productId: string, updated: InventoryState['products'][number]) {
+    if (isPersistentInventory) await inventoryRepository.updateProduct(productId, updated as unknown as Record<string, unknown>)
+    else inventoryRepository.transact((draft) => {
+      const index = draft.products.findIndex((product) => product.id === productId)
+      if (index >= 0) draft.products[index] = updated
+    })
+    return inventoryRepository.snapshot().products.find((row) => row.id === productId) ?? null
+  },
+  async advanceReceipt(receiptId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.advanceReceipt(draft, receiptId))
+    const state = inventoryRepository.snapshot()
+    const receipt = state.receipts.find((row) => row.id === receiptId)
+    if (!receipt) return null
+    if (receipt.status === 'ready') {
+      domainInventoryEngine.receive(structuredClone(state), receiptId)
+      await inventoryRepository.validateReceipt(receiptId)
+    } else {
+      const next = domainInventoryEngine.advanceReceipt(structuredClone(state), receiptId)
+      if (next) await inventoryRepository.setDocumentStatus('receipt', receiptId, next.status)
+    }
+    return inventoryRepository.snapshot().receipts.find((row) => row.id === receiptId) ?? null
+  },
+  async cancelReceipt(receiptId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.cancelReceipt(draft, receiptId))
+    await inventoryRepository.setDocumentStatus('receipt', receiptId, 'canceled')
+    return inventoryRepository.snapshot().receipts.find((row) => row.id === receiptId) ?? null
+  },
+  async advanceDelivery(deliveryId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.advanceDelivery(draft, deliveryId))
+    const delivery = inventoryRepository.snapshot().deliveries.find((row) => row.id === deliveryId)
+    if (!delivery) return null
+    if (delivery.status === 'ready') {
+      domainInventoryEngine.deliver(structuredClone(inventoryRepository.snapshot()), deliveryId)
+      await inventoryRepository.validateDelivery(deliveryId)
+    } else if (delivery.status === 'draft') await this.pickDelivery(deliveryId)
+    else if (delivery.status === 'waiting') await this.packDelivery(deliveryId)
+    return inventoryRepository.snapshot().deliveries.find((row) => row.id === deliveryId) ?? null
+  },
+  async pickDelivery(deliveryId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.pickDelivery(draft, deliveryId))
+    domainInventoryEngine.pickDelivery(structuredClone(inventoryRepository.snapshot()), deliveryId)
+    await inventoryRepository.pickDelivery(deliveryId)
+    return inventoryRepository.snapshot().deliveries.find((row) => row.id === deliveryId) ?? null
+  },
+  async packDelivery(deliveryId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.packDelivery(draft, deliveryId))
+    domainInventoryEngine.packDelivery(structuredClone(inventoryRepository.snapshot()), deliveryId)
+    await inventoryRepository.packDelivery(deliveryId)
+    return inventoryRepository.snapshot().deliveries.find((row) => row.id === deliveryId) ?? null
+  },
+  async cancelDelivery(deliveryId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.cancelDelivery(draft, deliveryId))
+    await inventoryRepository.setDocumentStatus('delivery', deliveryId, 'canceled')
+    return inventoryRepository.snapshot().deliveries.find((row) => row.id === deliveryId) ?? null
+  },
+  async advanceTransfer(transferId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.advanceTransfer(draft, transferId))
+    const state = inventoryRepository.snapshot()
+    const transfer = state.transfers.find((row) => row.id === transferId)
+    if (!transfer) return null
+    if (transfer.status === 'ready') {
+      domainInventoryEngine.transfer(structuredClone(state), transferId)
+      await inventoryRepository.validateTransfer(transferId)
+    } else {
+      const next = domainInventoryEngine.advanceTransfer(structuredClone(state), transferId)
+      if (next) await inventoryRepository.setDocumentStatus('transfer', transferId, next.status)
+    }
+    return inventoryRepository.snapshot().transfers.find((row) => row.id === transferId) ?? null
+  },
+  async cancelTransfer(transferId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => domainInventoryEngine.cancelTransfer(draft, transferId))
+    await inventoryRepository.setDocumentStatus('transfer', transferId, 'canceled')
+    return inventoryRepository.snapshot().transfers.find((row) => row.id === transferId) ?? null
+  },
+  async applyAdjustment(adjustmentId: string) {
+    if (!isPersistentInventory) return inventoryRepository.transact((draft) => {
+      const adjustment = draft.adjustments.find((item) => item.id === adjustmentId)
+      if (!adjustment || adjustment.status === 'applied') return null
+      domainInventoryEngine.adjust(draft, adjustmentId)
+      return adjustment
+    })
+    domainInventoryEngine.adjust(structuredClone(inventoryRepository.snapshot()), adjustmentId)
+    await inventoryRepository.applyAdjustment(adjustmentId)
+    return inventoryRepository.snapshot().adjustments.find((row) => row.id === adjustmentId) ?? null
   },
 }

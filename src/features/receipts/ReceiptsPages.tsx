@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
+import { EmptyState, ErrorState, LoadingState } from '../../components/shared/states'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { FilterDropdown, SearchBar } from '../../components/shared/filters'
 import { OperationTimeline } from '../../components/shared/operation-timeline'
@@ -20,6 +21,7 @@ import { operationTimelineSteps } from '../../utils/operationTimeline'
 const statusTitle = (status: string) => status[0].toUpperCase() + status.slice(1)
 
 export const ReceiptsPage = () => {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [warehouse, setWarehouse] = useState('all')
@@ -39,13 +41,13 @@ export const ReceiptsPage = () => {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Receipts" description="Incoming stock workflow" actionLabel="New Receipt" onAction={() => (window.location.href = '/receipts/new')} />
+      <PageHeader title="Receipts" description="Incoming stock workflow" actionLabel="New Receipt" onAction={() => navigate('/receipts/new')} />
       <div className="grid gap-2 md:grid-cols-3">
         <SearchBar value={search} onChange={setSearch} />
         <FilterDropdown value={status} onChange={setStatus} options={[{ label: 'All Statuses', value: 'all' }, { label: 'Draft', value: 'draft' }, { label: 'Waiting', value: 'waiting' }, { label: 'Ready', value: 'ready' }, { label: 'Done', value: 'done' }, { label: 'Canceled', value: 'canceled' }]} />
         <FilterDropdown value={warehouse} onChange={setWarehouse} options={[{ label: 'All Warehouses', value: 'all' }, ...state.warehouses.map((w) => ({ label: w.name, value: w.id }))]} />
       </div>
-      <DataTable
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message="Receipts could not be loaded. Please try again." /> : filtered.length === 0 ? <EmptyState title={query.data?.length ? 'No matching receipts' : 'No receipts yet'} message="Create a receipt to record incoming stock." /> : <DataTable
         data={filtered}
         columns={[
           { key: 'number', header: 'Receipt Number', render: (row) => <Link className="text-sky-300" to={`/receipts/${row.id}`}>{row.receiptNumber}</Link> },
@@ -57,7 +59,7 @@ export const ReceiptsPage = () => {
           { key: 'status', header: 'Status', render: (row) => <StatusBadge status={statusTitle(row.status)} /> },
           { key: 'creator', header: 'Created By', render: (row) => state.users.find((u) => u.id === row.createdBy)?.name },
         ]}
-      />
+      />}
     </div>
   )
 }
@@ -69,14 +71,14 @@ export const ReceiptNewPage = () => {
   const queryClient = useQueryClient()
   const today = new Date().toISOString().slice(0, 10)
   const [form, setForm] = useState(() => {
-    const warehouseId = searchParams.get('warehouseId') ?? 'w1'
+    const warehouseId = searchParams.get('warehouseId') ?? state.warehouses.find((row) => row.status === 'active')?.id ?? ''
     const requestedLocation = searchParams.get('locationId')
     const locationId = requestedLocation && state.locations.some((location) => location.id === requestedLocation && location.warehouseId === warehouseId)
       ? requestedLocation
       : state.locations.find((location) => location.warehouseId === warehouseId)?.id ?? ''
     return {
       vendor: '', warehouseId, reference: '', scheduledDate: today,
-      lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? 'p1', expectedQuantity: 1, receivedQuantity: 1, locationId }],
+      lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? state.products[0]?.id ?? '', expectedQuantity: 1, receivedQuantity: 1, locationId }],
     }
   })
   const createMutation = useMutation({
@@ -98,6 +100,7 @@ export const ReceiptNewPage = () => {
       queryClient.invalidateQueries()
       navigate(`/receipts/${receipt.id}`)
     },
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Receipt could not be saved.'),
   })
 
   return (

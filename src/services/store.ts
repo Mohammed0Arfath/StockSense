@@ -27,3 +27,8 @@ export const resetState = () => {
   state = structuredClone(initialInventoryState)
   listeners.forEach((listener) => listener())
 }
+
+export const replaceState = (nextState: InventoryState) => {
+  state = structuredClone(nextState)
+  listeners.forEach((listener) => listener())
+}

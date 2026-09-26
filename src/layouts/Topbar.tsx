@@ -1,12 +1,12 @@
-import { Bell, Menu } from 'lucide-react'
-import { useState } from 'react'
+import { Menu } from 'lucide-react'
 import { CommandMenu } from '../components/shared/command-menu'
-import { Select } from '../components/ui/select'
 import { useAuth } from '../hooks/useAuth'
+import { useInventoryState } from '../hooks/useInventoryState'
 
 export const Topbar = ({ title, onMobileOpen }: { title: string; onMobileOpen: () => void }) => {
-  const [search, setSearch] = useState('')
   const { user } = useAuth()
+  const state = useInventoryState()
+  const warehouseName = state.warehouses.find((warehouse) => warehouse.id === user?.warehouseId)?.name
 
   return (
     <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur">
@@ -18,12 +18,8 @@ export const Topbar = ({ title, onMobileOpen }: { title: string; onMobileOpen: (
           <p className="text-xs text-slate-400">Stock Operations</p>
           <h2 className="text-lg font-semibold text-slate-100">{title}</h2>
         </div>
-        <div className="min-w-56 flex-1"><CommandMenu value={search} onChange={setSearch} /></div>
-        <Bell className="h-4 w-4 text-slate-400" aria-label="Notifications" />
-        <Select className="w-44">
-          <option>Main Warehouse</option>
-          <option>South Warehouse</option>
-        </Select>
+        <div className="min-w-56 flex-1"><CommandMenu /></div>
+        <p className="hidden text-xs text-slate-400 lg:block">{warehouseName ?? 'All warehouses'}</p>
         <div className="text-right text-sm text-slate-300">
           <p>{user?.name}</p>
           <p className="text-xs text-slate-500">{user?.role}</p>

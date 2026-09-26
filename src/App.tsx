@@ -17,9 +17,11 @@ import { SettingsPage } from './features/settings/SettingsPage'
 import { ProfilePage } from './features/profile/ProfilePage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { useAuth } from './hooks/useAuth'
+import { LoadingState } from './components/shared/states'
 
 const ProtectedRoute = () => {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isLoading } = useAuth()
+  if (isLoading) return <LoadingState />
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />
 }
 

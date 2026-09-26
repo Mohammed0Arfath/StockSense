@@ -20,16 +20,10 @@ export const adjustmentService = {
       statusHistory: [{ status: 'draft', timestamp: new Date().toISOString() }],
       adjustmentNumber: `ADJ-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999)).padStart(3, '0')}`,
     }
-    inventoryRepository.transact((draft) => draft.adjustments.unshift(adjustment))
-    return adjustment
+    return inventoryEngine.createAdjustment(adjustment)
   },
 
   async applyAdjustment(adjustmentId: string) {
-    return inventoryRepository.transact((draft) => {
-      const adjustment = draft.adjustments.find((item) => item.id === adjustmentId)
-      if (!adjustment || adjustment.status === 'applied') return null
-      inventoryEngine.adjust(draft, adjustmentId)
-      return adjustment
-    })
+    return inventoryEngine.applyAdjustment(adjustmentId)
   },
 }

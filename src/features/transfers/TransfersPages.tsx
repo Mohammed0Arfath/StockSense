@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
+import { EmptyState, ErrorState, LoadingState } from '../../components/shared/states'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { OperationTimeline } from '../../components/shared/operation-timeline'
 import { PageHeader } from '../../components/shared/page-header'
@@ -18,12 +19,13 @@ import { operationTimelineSteps } from '../../utils/operationTimeline'
 const statusTitle = (status: string) => status[0].toUpperCase() + status.slice(1)
 
 export const TransfersPage = () => {
+  const navigate = useNavigate()
   const query = useQuery({ queryKey: ['transfers'], queryFn: () => transferService.getTransfers() })
   const state = getState()
   return (
     <div className="space-y-4">
-      <PageHeader title="Internal Transfers" description="Move stock without changing global quantity" actionLabel="New Transfer" onAction={() => (window.location.href = '/transfers/new')} />
-      <DataTable data={query.data ?? []} columns={[
+      <PageHeader title="Internal Transfers" description="Move stock without changing global quantity" actionLabel="New Transfer" onAction={() => navigate('/transfers/new')} />
+      {query.isLoading ? <LoadingState /> : query.isError ? <ErrorState message="Transfers could not be loaded. Please try again." /> : !query.data?.length ? <EmptyState title="No transfers yet" message="Create an internal transfer to move stock between locations." /> : <DataTable data={query.data} columns={[
         { key: 'number', header: 'Transfer Number', render: (row) => <Link className="text-sky-300" to={`/transfers/${row.id}`}>{row.transferNumber}</Link> },
         { key: 'product', header: 'Product', render: (row) => state.products.find((p) => p.id === row.lines[0]?.productId)?.name },
         { key: 'qty', header: 'Quantity', render: (row) => row.lines.reduce((sum, line) => sum + line.quantity, 0) },
@@ -31,7 +33,7 @@ export const TransfersPage = () => {
         { key: 'destination', header: 'Destination', render: (row) => `${state.warehouses.find((w) => w.id === row.destinationWarehouseId)?.name} / ${state.locations.find((l) => l.id === row.destinationLocationId)?.name}` },
         { key: 'date', header: 'Scheduled Date', render: (row) => new Date(row.scheduledDate).toLocaleDateString() },
         { key: 'status', header: 'Status', render: (row) => <StatusBadge status={statusTitle(row.status)} /> },
-      ]} />
+      ]} />}
     </div>
   )
 }
@@ -43,7 +45,7 @@ export const TransferNewPage = () => {
   const queryClient = useQueryClient()
   const [form, setForm] = useState(() => ({
     ...(() => {
-      const sourceWarehouseId = searchParams.get('warehouseId') ?? 'w1'
+      const sourceWarehouseId = searchParams.get('warehouseId') ?? state.warehouses.find((row) => row.status === 'active')?.id ?? ''
       const sourceLocationId = searchParams.get('locationId')
       const firstSourceLocation = state.locations.find((location) => location.warehouseId === sourceWarehouseId && location.status === 'active')
       const validSourceLocationId = sourceLocationId && state.locations.some((location) => location.id === sourceLocationId && location.warehouseId === sourceWarehouseId && location.status === 'active')
@@ -58,7 +60,7 @@ export const TransferNewPage = () => {
       }
     })(),
     scheduledDate: new Date().toISOString().slice(0, 10),
-    lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? 'p1', quantity: 1 }],
+    lines: [{ id: crypto.randomUUID(), productId: searchParams.get('productId') ?? state.products[0]?.id ?? '', quantity: 1 }],
   }))
   const createMutation = useMutation({
     mutationFn: () => transferService.createTransfer({

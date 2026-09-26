@@ -2,7 +2,6 @@ import {
   LayoutDashboard,
   Package,
   Boxes,
-  Shapes,
   Truck,
   ArrowRightLeft,
   ClipboardMinus,
@@ -24,7 +23,6 @@ export const navSections = [
     items: [
       { label: 'Products', path: '/products', icon: Package },
       { label: 'Stock', path: '/stock', icon: Boxes },
-      { label: 'Categories', path: '/products?view=categories', icon: Shapes },
     ],
   },
   {

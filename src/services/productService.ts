@@ -82,11 +82,7 @@ export const productService = {
       defaultLocationId: payload.defaultLocationId,
     }
 
-    inventoryRepository.transact((draft) => {
-      draft.products.unshift(product)
-      inventoryEngine.initializeProductStock(draft, product.id, payload.initialStock, 'u1')
-    })
-    return product
+    return inventoryEngine.createProduct(product, payload.initialStock)
   },
 
   async updateProduct(productId: string, payload: Partial<Product>) {
@@ -94,11 +90,7 @@ export const productService = {
     if (!current) throw new Error('Product not found.')
     const updated = { ...current, ...payload }
     validateProductFields(updated, inventoryRepository.snapshot().products, productId)
-    inventoryRepository.transact((draft) => {
-      const index = draft.products.findIndex((product) => product.id === productId)
-      if (index >= 0) draft.products[index] = updated
-    })
-    return this.getProduct(productId)
+    return inventoryEngine.updateProduct(productId, updated)
   },
 }
 

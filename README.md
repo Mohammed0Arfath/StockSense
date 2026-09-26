@@ -1,99 +1,68 @@
-# StockSense
-Modern Inventory Management System built for the Odoo Hackathon. A centralized platform for managing products, stock, warehouses, receipts, deliveries, transfers, adjustments, and inventory movement history with a clean, scalable frontend architecture.
-# StockSense
+﻿# StockSense
 
-Modern inventory management system built for the Odoo Hackathon. StockSense centralizes products, stock,
-warehouses, receipts, deliveries, transfers, adjustments, and inventory movement history in a responsive
-React application.
-
-## Architecture
-
-StockSense is a client-side React and TypeScript application built with Vite. The code is organized by
-feature at the UI boundary and by responsibility at the domain boundary.
+StockSense is a React, TypeScript, and Vite inventory management application. Inventory changes follow one application mutation path:
 
 ```text
-React Router
-		|
-		v
-AppLayout + feature pages
-		|
-		v
-Feature services (receipts, deliveries, transfers, adjustments, stock)
-		|
-		+--> Inventory Engine -- validates and applies stock transactions
-		|         |
-		|         +--> domain state and movement ledger
-		|
-		+--> Inventory Repository -- current in-memory persistence boundary
-							|
-							+--> Store and mock inventory data
+React UI
+  ↓
+Hooks
+  ↓
+Services
+  ↓
+Inventory Engine
+  ↓
+Inventory Repository
+  ↓
+Supabase RPC / PostgreSQL
+  ↓
+Stock / Operations / Ledger
 ```
 
-### Application and UI layers
+The UI presents forms and results; hooks expose service calls and refresh queries; services provide the application-facing API. The inventory engine performs domain preflight and orchestrates mutations, while the repository owns persistence details and translates database errors. PostgreSQL RPCs remain the final validation and atomic transaction boundary. Tests use the in-memory repository state adapter.
 
-- `src/App.tsx` defines public authentication routes and protected application routes.
-- `src/layouts/` provides the authenticated shell, sidebar navigation, and top bar.
-- `src/features/` contains page-level workflows for products, stock, receipts, deliveries, transfers,
-	adjustments, warehouses, locations, reordering rules, settings, and profile management.
-- `src/components/shared/` and `src/components/ui/` contain reusable domain-aware and presentational
-	components.
+## Stack
 
-### Domain and service layers
+- React 19, TypeScript, Vite, React Router, TanStack Query
+- npm with package-lock.json
+- Supabase Auth and PostgreSQL
+- No service-role key is used by browser code
 
-- `src/types/domain.ts` defines the inventory domain model and operation types.
-- `src/data/mockData.ts` provides the initial application state used by the current demo deployment.
-- `src/services/store.ts` owns the observable in-memory state and update mechanism.
-- `src/services/inventoryRepository.ts` isolates services from persistence. It currently adapts the store,
-	so a remote API or database adapter can be introduced without changing feature services.
-- `src/services/inventoryEngine.ts` is the transaction boundary for receiving, delivering, transferring,
-	and adjusting stock. It validates the full operation before mutating state, preventing partial updates,
-	and writes movement ledger entries for successful lines.
-- Feature services such as `receiptService.ts`, `deliveryService.ts`, `transferService.ts`, and
-	`adjustmentService.ts` coordinate user-facing operations and delegate stock mutations to the engine.
-- `src/services/ledgerService.ts` exposes movement history, while `src/utils/inventory.ts` contains stock
-	aggregation and status calculations.
+## Frontend setup
 
-### State synchronization
+1. Install a recent Node.js 22 release and npm.
+2. Run npm install.
+3. Copy .env.example to .env.local.
+4. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY from your Supabase project.
+5. Run npm run dev.
 
-The repository publishes changes through a subscription. `useInventorySync` listens for those changes and
-invalidates TanStack Query caches, allowing dashboard, stock, and workflow screens to refresh after an
-operation without coupling UI components directly to the store.
+The Supabase URL and publishable key are public client configuration values. Never put a database password, secret key, or other privileged secret in a VITE_ variable.
 
-### Transaction guarantees
+## Database setup
 
-Inventory operations follow a validate-then-apply model:
+Install the Supabase CLI. To start a local Supabase stack and apply migrations plus deterministic demo fixtures:
 
-1. Resolve the referenced document, warehouse, locations, products, and stock records.
-2. Validate quantities, statuses, warehouse boundaries, and available stock.
-3. Apply all stock mutations and document status changes only after validation succeeds.
-4. Append one movement-history entry per successful inventory line.
+    npx supabase start
+    npx supabase db reset
 
-Invalid operations raise `InventoryOperationError` and leave stock, document status, and ledger history
-unchanged.
+For a hosted project:
 
-## Development
+    npx supabase link --project-ref YOUR_PROJECT_REF
+    npx supabase db push
 
-Install dependencies and start the Vite development server:
+Migrations under supabase/migrations create profiles, categories, products, warehouses, locations, location-level stock, receipts and lines, deliveries and lines, transfers and lines, adjustments, reorder rules, notifications, status history, and the movement ledger. Stock-changing RPCs lock affected rows and atomically update stock, operation status, ledger, and transition history.
 
-```bash
-npm install
-npm run dev
-```
+New accounts default to Warehouse Staff. To grant a trusted initial administrator, run this as the project owner after signup:
 
-Run the test suite:
+    update public.profiles set role = 'Inventory Manager'
+    where id = (select id from auth.users where email = 'admin@example.com');
 
-```bash
-npm test
-```
+Configure the Supabase Auth password recovery email template to send an OTP token and allow http://localhost:5173/reset-password as a redirect URL. Signup may require email confirmation before the user can sign in.
 
-Create a production build:
+## Checks
 
-```bash
-npm run build
-```
+- Unit tests: npm test
+- Lint: npm run lint
+- Typecheck: npx tsc -b
+- Production build: npm run build
 
-Run the linter:
-
-```bash
-npm run lint
-```
+The tests run against in-memory fixtures. No Supabase project credentials or local Supabase service were available in this workspace, so database integration tests and actual migration execution were not run. Use the local Supabase stack to smoke-test signup, role setup, CRUD, and inventory transactions before deployment.

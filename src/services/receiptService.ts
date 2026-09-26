@@ -14,15 +14,14 @@ export const receiptService = {
 
   async createReceipt(payload: Omit<Receipt, 'id'>) {
     const receipt = { ...payload, id: createId('receipt'), statusHistory: payload.statusHistory ?? [{ status: 'draft' as const, timestamp: new Date().toISOString() }] }
-    inventoryRepository.transact((draft) => draft.receipts.unshift(receipt))
-    return receipt
+    return inventoryEngine.createReceipt(receipt)
   },
 
   async advanceStatus(receiptId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.advanceReceipt(draft, receiptId))
+    return inventoryEngine.advanceReceipt(receiptId)
   },
 
   async cancelReceipt(receiptId: string) {
-    return inventoryRepository.transact((draft) => inventoryEngine.cancelReceipt(draft, receiptId))
+    return inventoryEngine.cancelReceipt(receiptId)
   },
 }

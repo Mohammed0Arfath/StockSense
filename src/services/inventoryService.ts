@@ -1,10 +1,9 @@
-import { wait } from './store'
+import { reorderingRuleService } from './reorderingRuleService'
 import { inventoryRepository } from './inventoryRepository'
 import { aggregateProductStock, stockStatusLabel } from '../utils/inventory'
 
 export const inventoryService = {
   async getDashboardMetrics() {
-    await wait()
     const state = inventoryRepository.snapshot()
     const totals = state.products.map((product) => {
       const agg = aggregateProductStock(product, state.stockItems)
@@ -23,7 +22,6 @@ export const inventoryService = {
   },
 
   async getStockView() {
-    await wait()
     const state = inventoryRepository.snapshot()
     return state.stockItems.map((item) => {
       const product = state.products.find((p) => p.id === item.productId)
@@ -42,8 +40,19 @@ export const inventoryService = {
   },
 
   async getStockAlerts() {
-    await wait(120)
     const stock = await this.getStockView()
-    return stock.filter((row) => row.product && row.available <= row.product.reorderPoint)
+    const rules = await reorderingRuleService.getRules()
+    const ruleKeys = new Set(rules.map((rule) => `${rule.productId}:${rule.locationId}`))
+    const ruleAlerts = rules
+      .filter((rule) => rule.status !== 'Healthy')
+      .map((rule) => {
+        const row = stock.find((item) => item.productId === rule.productId && item.locationId === rule.locationId)
+        return row ? { ...row, available: rule.currentQty, status: rule.status } : null
+      })
+      .filter((row) => row !== null)
+    const fallbackAlerts = stock.filter((row) =>
+      row.product && !ruleKeys.has(`${row.productId}:${row.locationId}`) && row.available <= row.product.reorderPoint,
+    )
+    return [...ruleAlerts, ...fallbackAlerts]
   },
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { FilterDropdown, SearchBar } from '../../components/shared/filters'
@@ -62,9 +63,17 @@ export const ReceiptsPage = () => {
 
 export const ReceiptNewPage = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const state = getState()
   const queryClient = useQueryClient()
-  const [form, setForm] = useState({ vendor: '', warehouseId: 'w1', reference: '', productId: 'p1', quantity: 1, locationId: 'l1' })
+  const [form, setForm] = useState(() => {
+    const warehouseId = searchParams.get('warehouseId') ?? 'w1'
+    const requestedLocation = searchParams.get('locationId')
+    const locationId = requestedLocation && state.locations.some((location) => location.id === requestedLocation && location.warehouseId === warehouseId)
+      ? requestedLocation
+      : state.locations.find((location) => location.warehouseId === warehouseId)?.id ?? ''
+    return { vendor: '', warehouseId, reference: '', productId: searchParams.get('productId') ?? 'p1', quantity: 1, locationId }
+  })
   const createMutation = useMutation({
     mutationFn: () =>
       receiptService.createReceipt({
@@ -90,8 +99,8 @@ export const ReceiptNewPage = () => {
       <Card><CardContent className="grid gap-3 md:grid-cols-2">
         <Input placeholder="Vendor" value={form.vendor} onChange={(e) => setForm((s) => ({ ...s, vendor: e.target.value }))} />
         <Input placeholder="Reference" value={form.reference} onChange={(e) => setForm((s) => ({ ...s, reference: e.target.value }))} />
-        <Select value={form.warehouseId} onChange={(e) => setForm((s) => ({ ...s, warehouseId: e.target.value }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.locationId} onChange={(e) => setForm((s) => ({ ...s, locationId: e.target.value }))}>{state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
+        <Select value={form.warehouseId} onChange={(e) => setForm((s) => ({ ...s, warehouseId: e.target.value, locationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select value={form.locationId} onChange={(e) => setForm((s) => ({ ...s, locationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.warehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
         <Select value={form.productId} onChange={(e) => setForm((s) => ({ ...s, productId: e.target.value }))}>{state.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         <Input type="number" value={form.quantity} onChange={(e) => setForm((s) => ({ ...s, quantity: Number(e.target.value) }))} />
       </CardContent></Card>
@@ -110,6 +119,7 @@ export const ReceiptDetailPage = () => {
   const advanceMutation = useMutation({
     mutationFn: () => receiptService.advanceStatus(receiptId),
     onSuccess: () => queryClient.invalidateQueries(),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Receipt could not be validated.'),
   })
   const receipt = query.data as Receipt | null
   if (!receipt) return <p className="text-sm text-slate-400">Receipt not found.</p>
@@ -131,13 +141,18 @@ export const ReceiptDetailPage = () => {
       ]} />
       <div className="flex items-center gap-2">
         <StatusBadge status={statusTitle(receipt.status)} />
-        <Button variant="secondary" onClick={() => advanceMutation.mutate()}>Advance Stage</Button>
-        <Button onClick={() => setConfirmOpen(true)} disabled={receipt.status !== 'ready'}>Validate Receipt</Button>
+        <Button variant="secondary" disabled={receipt.status === 'ready' || receipt.status === 'done' || receipt.status === 'canceled' || advanceMutation.isPending} onClick={() => advanceMutation.mutate()}>Advance Stage</Button>
+        <Button onClick={() => setConfirmOpen(true)} disabled={receipt.status !== 'ready' || advanceMutation.isPending}>Validate Receipt</Button>
       </div>
       <ConfirmDialog
         open={confirmOpen}
         title="Validate Receipt?"
-        message={`${receipt.lines.reduce((sum, line) => sum + (line.receivedQuantity || line.expectedQuantity), 0)} units will be added to inventory.`}
+        message={receipt.lines.map((line) => {
+          const product = state.products.find((row) => row.id === line.productId)
+          const location = state.locations.find((row) => row.id === line.locationId)
+          const warehouse = state.warehouses.find((row) => row.id === receipt.warehouseId)
+          return `${line.receivedQuantity} ${product?.unit ?? line.unit} of ${product?.name ?? 'product'} will be added to ${warehouse?.name ?? 'warehouse'} / ${location?.name ?? 'location'}.`
+        }).join(' ')}
         confirmLabel="Validate Receipt"
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => {

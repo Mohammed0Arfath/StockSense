@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { FilterDropdown, SearchBar } from '../../components/shared/filters'
@@ -54,9 +55,13 @@ export const DeliveriesPage = () => {
 export const DeliveryNewPage = () => {
   const state = getState()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const [form, setForm] = useState({ customer: '', sourceWarehouseId: 'w1', reference: '', productId: 'p1', quantity: 1 })
-  const available = state.stockItems.filter((item) => item.productId === form.productId).reduce((sum, row) => sum + row.onHand - row.reserved, 0)
+  const [form, setForm] = useState(() => ({
+    customer: '', sourceWarehouseId: searchParams.get('warehouseId') ?? 'w1', reference: '',
+    productId: searchParams.get('productId') ?? 'p1', quantity: 1,
+  }))
+  const available = state.stockItems.filter((item) => item.productId === form.productId && item.warehouseId === form.sourceWarehouseId).reduce((sum, row) => sum + Math.max(row.onHand - row.reserved, 0), 0)
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -100,7 +105,11 @@ export const DeliveryDetailPage = () => {
   const query = useQuery({ queryKey: ['delivery', deliveryId], queryFn: () => deliveryService.getDelivery(deliveryId) })
   const delivery = query.data
   const canFulfillQuery = useQuery({ queryKey: ['delivery-fulfill', deliveryId], queryFn: () => deliveryService.canFulfillDelivery(deliveryId) })
-  const advanceMutation = useMutation({ mutationFn: () => deliveryService.advanceStatus(deliveryId), onSuccess: () => queryClient.invalidateQueries() })
+  const advanceMutation = useMutation({
+    mutationFn: () => deliveryService.advanceStatus(deliveryId),
+    onSuccess: () => queryClient.invalidateQueries(),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Delivery could not be validated.'),
+  })
   if (!delivery) return <p className="text-sm text-slate-400">Delivery not found.</p>
 
   const steps = ['draft', 'waiting', 'ready', 'done']
@@ -112,7 +121,7 @@ export const DeliveryDetailPage = () => {
       <OperationTimeline steps={steps.map((step, idx) => ({ label: statusTitle(step), active: idx <= currentIndex }))} />
       <DataTable data={delivery.lines} columns={[
         { key: 'product', header: 'Product', render: (line) => state.products.find((p) => p.id === line.productId)?.name },
-        { key: 'available', header: 'Available Quantity', render: (line) => state.stockItems.filter((item) => item.productId === line.productId).reduce((sum, item) => sum + item.onHand - item.reserved, 0) },
+        { key: 'available', header: 'Available Quantity', render: (line) => state.stockItems.filter((item) => item.productId === line.productId && item.warehouseId === delivery.sourceWarehouseId).reduce((sum, item) => sum + Math.max(item.onHand - item.reserved, 0), 0) },
         { key: 'requested', header: 'Requested Quantity', render: (line) => line.requestedQuantity },
         { key: 'picked', header: 'Picked', render: (line) => line.pickedQuantity },
         { key: 'packed', header: 'Packed', render: (line) => line.packedQuantity },
@@ -120,13 +129,17 @@ export const DeliveryDetailPage = () => {
       {!canFulfillQuery.data ? <p className="text-sm text-red-300">Requested quantity exceeds available stock.</p> : null}
       <div className="flex gap-2">
         <StatusBadge status={statusTitle(delivery.status)} />
-        <Button variant="secondary" onClick={() => advanceMutation.mutate()}>Pick / Pack / Advance</Button>
-        <Button disabled={!canFulfillQuery.data || delivery.status !== 'ready'} onClick={() => setConfirmOpen(true)}>Validate Delivery</Button>
+        <Button variant="secondary" disabled={delivery.status === 'ready' || delivery.status === 'done' || delivery.status === 'canceled' || advanceMutation.isPending} onClick={() => advanceMutation.mutate()}>Pick / Pack / Advance</Button>
+        <Button disabled={!canFulfillQuery.data || delivery.status !== 'ready' || advanceMutation.isPending} onClick={() => setConfirmOpen(true)}>Validate Delivery</Button>
       </div>
       <ConfirmDialog
         open={confirmOpen}
         title="Validate Delivery?"
-        message={`${delivery.lines.reduce((sum, line) => sum + line.requestedQuantity, 0)} units will be deducted from inventory.`}
+        message={delivery.lines.map((line) => {
+          const product = state.products.find((row) => row.id === line.productId)
+          const warehouse = state.warehouses.find((row) => row.id === delivery.sourceWarehouseId)
+          return `${line.requestedQuantity} ${product?.unit ?? ''} of ${product?.name ?? 'product'} will be deducted from ${warehouse?.name ?? 'warehouse'}.`
+        }).join(' ')}
         confirmLabel="Validate Delivery"
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => {

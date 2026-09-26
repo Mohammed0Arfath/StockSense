@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { OperationTimeline } from '../../components/shared/operation-timeline'
@@ -36,9 +37,27 @@ export const TransfersPage = () => {
 
 export const TransferNewPage = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const state = getState()
   const queryClient = useQueryClient()
-  const [form, setForm] = useState({ sourceWarehouseId: 'w1', sourceLocationId: 'l1', destinationWarehouseId: 'w2', destinationLocationId: 'l4', productId: 'p1', quantity: 1 })
+  const [form, setForm] = useState(() => ({
+    ...(() => {
+      const sourceWarehouseId = searchParams.get('warehouseId') ?? 'w1'
+      const sourceLocationId = searchParams.get('locationId')
+      const firstSourceLocation = state.locations.find((location) => location.warehouseId === sourceWarehouseId && location.status === 'active')
+      const validSourceLocationId = sourceLocationId && state.locations.some((location) => location.id === sourceLocationId && location.warehouseId === sourceWarehouseId && location.status === 'active')
+        ? sourceLocationId
+        : firstSourceLocation?.id ?? ''
+      const destinationWarehouse = state.warehouses.find((warehouse) => warehouse.id !== sourceWarehouseId && warehouse.status === 'active')
+      return {
+        sourceWarehouseId,
+        sourceLocationId: validSourceLocationId,
+        destinationWarehouseId: destinationWarehouse?.id ?? '',
+        destinationLocationId: state.locations.find((location) => location.warehouseId === destinationWarehouse?.id && location.status === 'active')?.id ?? '',
+      }
+    })(),
+    productId: searchParams.get('productId') ?? 'p1', quantity: 1,
+  }))
   const createMutation = useMutation({
     mutationFn: () => transferService.createTransfer({
       transferNumber: `TRF-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 999)).padStart(3, '0')}`,
@@ -60,10 +79,10 @@ export const TransferNewPage = () => {
     <div className="space-y-4">
       <PageHeader title="New Internal Transfer" description="Total stock remains unchanged; only location changes." />
       <Card><CardContent className="grid gap-3 md:grid-cols-2">
-        <Select value={form.sourceWarehouseId} onChange={(e) => setForm((s) => ({ ...s, sourceWarehouseId: e.target.value }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.sourceLocationId} onChange={(e) => setForm((s) => ({ ...s, sourceLocationId: e.target.value }))}>{state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
-        <Select value={form.destinationWarehouseId} onChange={(e) => setForm((s) => ({ ...s, destinationWarehouseId: e.target.value }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.destinationLocationId} onChange={(e) => setForm((s) => ({ ...s, destinationLocationId: e.target.value }))}>{state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
+        <Select value={form.sourceWarehouseId} onChange={(e) => setForm((s) => ({ ...s, sourceWarehouseId: e.target.value, sourceLocationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select value={form.sourceLocationId} onChange={(e) => setForm((s) => ({ ...s, sourceLocationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.sourceWarehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
+        <Select value={form.destinationWarehouseId} onChange={(e) => setForm((s) => ({ ...s, destinationWarehouseId: e.target.value, destinationLocationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select value={form.destinationLocationId} onChange={(e) => setForm((s) => ({ ...s, destinationLocationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.destinationWarehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
         <Select value={form.productId} onChange={(e) => setForm((s) => ({ ...s, productId: e.target.value }))}>{state.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         <Input type="number" value={form.quantity} onChange={(e) => setForm((s) => ({ ...s, quantity: Number(e.target.value) }))} />
       </CardContent></Card>
@@ -79,7 +98,11 @@ export const TransferDetailPage = () => {
   const query = useQuery({ queryKey: ['transfer', transferId], queryFn: () => transferService.getTransfer(transferId) })
   const transfer = query.data
   const state = getState()
-  const advanceMutation = useMutation({ mutationFn: () => transferService.advanceStatus(transferId), onSuccess: () => queryClient.invalidateQueries() })
+  const advanceMutation = useMutation({
+    mutationFn: () => transferService.advanceStatus(transferId),
+    onSuccess: () => queryClient.invalidateQueries(),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Transfer could not be validated.'),
+  })
   if (!transfer) return <p className="text-sm text-slate-400">Transfer not found.</p>
 
   const steps = ['draft', 'waiting', 'ready', 'done']
@@ -94,8 +117,15 @@ export const TransferDetailPage = () => {
         { key: 'qty', header: 'Quantity', render: (line) => line.quantity },
       ]} />
       <p className="text-xs text-slate-400">This transfer redistributes stock and does not change total global stock.</p>
-      <div className="flex gap-2"><Button variant="secondary" onClick={() => advanceMutation.mutate()}>Advance Stage</Button><Button disabled={transfer.status !== 'ready'} onClick={() => setConfirmOpen(true)}>Validate Transfer</Button></div>
-      <ConfirmDialog open={confirmOpen} title="Validate Transfer?" message="Source location will decrease and destination will increase by the transfer quantity." confirmLabel="Validate Transfer" onCancel={() => setConfirmOpen(false)} onConfirm={() => { setConfirmOpen(false); advanceMutation.mutate() }} />
+      <div className="flex gap-2"><Button variant="secondary" disabled={transfer.status === 'ready' || transfer.status === 'done' || transfer.status === 'canceled' || advanceMutation.isPending} onClick={() => advanceMutation.mutate()}>Advance Stage</Button><Button disabled={transfer.status !== 'ready' || advanceMutation.isPending} onClick={() => setConfirmOpen(true)}>Validate Transfer</Button></div>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Validate Transfer?"
+        message={`${transfer.lines.map((line) => `${line.quantity} ${state.products.find((product) => product.id === line.productId)?.unit ?? ''} of ${state.products.find((product) => product.id === line.productId)?.name ?? 'product'}`).join(', ')} will move from ${state.warehouses.find((row) => row.id === transfer.sourceWarehouseId)?.name} / ${state.locations.find((row) => row.id === transfer.sourceLocationId)?.name} to ${state.warehouses.find((row) => row.id === transfer.destinationWarehouseId)?.name} / ${state.locations.find((row) => row.id === transfer.destinationLocationId)?.name}.`}
+        confirmLabel="Validate Transfer"
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => { setConfirmOpen(false); advanceMutation.mutate() }}
+      />
     </div>
   )
 }

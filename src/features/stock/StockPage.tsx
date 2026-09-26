@@ -1,22 +1,25 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { DataTable } from '../../components/shared/data-table'
+import { EmptyState, ErrorState, LoadingState } from '../../components/shared/states'
 import { FilterDropdown } from '../../components/shared/filters'
 import { MetricCard } from '../../components/shared/metric-card'
 import { PageHeader } from '../../components/shared/page-header'
 import { StatusBadge } from '../../components/shared/status-badge'
 import { inventoryService } from '../../services/inventoryService'
-import { getState } from '../../services/store'
+import { useInventoryState } from '../../hooks/useInventoryState'
+
+const EMPTY_STOCK_ROWS: Awaited<ReturnType<typeof inventoryService.getStockView>> = []
 
 export const StockPage = () => {
-  const state = getState()
+  const state = useInventoryState()
   const [warehouse, setWarehouse] = useState('all')
   const [location, setLocation] = useState('all')
   const [category, setCategory] = useState('all')
   const [status, setStatus] = useState('all')
 
   const stockQuery = useQuery({ queryKey: ['stock-view'], queryFn: () => inventoryService.getStockView() })
-  const rows = stockQuery.data ?? []
+  const rows = stockQuery.data ?? EMPTY_STOCK_ROWS
 
   const filtered = useMemo(
     () =>
@@ -39,12 +42,14 @@ export const StockPage = () => {
         <MetricCard title="Available" value={filtered.reduce((sum, row) => sum + row.available, 0)} />
       </div>
       <div className="grid gap-2 md:grid-cols-4">
-        <FilterDropdown value={warehouse} onChange={setWarehouse} options={[{ label: 'All Warehouses', value: 'all' }, ...state.warehouses.map((w) => ({ label: w.name, value: w.id }))]} />
-        <FilterDropdown value={location} onChange={setLocation} options={[{ label: 'All Locations', value: 'all' }, ...state.locations.map((l) => ({ label: l.name, value: l.id }))]} />
+        <FilterDropdown value={warehouse} onChange={(value) => { setWarehouse(value); setLocation('all') }} options={[{ label: 'All Warehouses', value: 'all' }, ...state.warehouses.map((w) => ({ label: w.name, value: w.id }))]} />
+        <FilterDropdown value={location} onChange={setLocation} options={[{ label: 'All Locations', value: 'all' }, ...state.locations.filter((item) => warehouse === 'all' || item.warehouseId === warehouse).map((l) => ({ label: l.name, value: l.id }))]} />
         <FilterDropdown value={category} onChange={setCategory} options={[{ label: 'All Categories', value: 'all' }, ...state.categories.map((c) => ({ label: c.name, value: c.id }))]} />
         <FilterDropdown value={status} onChange={setStatus} options={[{ label: 'All Status', value: 'all' }, { label: 'In Stock', value: 'In Stock' }, { label: 'Low Stock', value: 'Low Stock' }, { label: 'Out of Stock', value: 'Out of Stock' }]} />
       </div>
-      <DataTable
+      {stockQuery.isLoading ? <LoadingState /> : stockQuery.isError ? <ErrorState message="Stock could not be loaded. Please try again." /> : filtered.length === 0 ? (
+        <EmptyState title={rows.length ? 'No matching stock' : 'No stock records'} message={rows.length ? 'Adjust your filters to see stock.' : 'Stock will appear here after an initial balance or receipt.'} />
+      ) : <DataTable
         data={filtered}
         columns={[
           { key: 'product', header: 'Product', render: (row) => row.product?.name },
@@ -57,7 +62,7 @@ export const StockPage = () => {
           { key: 'reorder', header: 'Reorder Point', render: (row) => row.product?.reorderPoint },
           { key: 'status', header: 'Status', render: (row) => <StatusBadge status={row.status} /> },
         ]}
-      />
+      />}
     </div>
   )
 }

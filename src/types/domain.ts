@@ -4,6 +4,7 @@ export type AdjustmentStatus = 'draft' | 'applied'
 export type MoveOperation = 'Receipt' | 'Delivery' | 'Internal Transfer' | 'Adjustment'
 export type LocationType = 'storage' | 'production' | 'receiving' | 'dispatch'
 export type RecordStatus = 'active' | 'inactive'
+export type ReorderingStatus = 'Healthy' | 'Reorder Required' | 'Critical'
 
 export interface User {
   id: string

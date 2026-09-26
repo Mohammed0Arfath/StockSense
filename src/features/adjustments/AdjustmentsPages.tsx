@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { DataTable } from '../../components/shared/data-table'
 import { ConfirmDialog } from '../../components/shared/confirm-dialog'
 import { PageHeader } from '../../components/shared/page-header'
@@ -36,8 +37,13 @@ export const AdjustmentsPage = () => {
 export const AdjustmentNewPage = () => {
   const state = getState()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const [form, setForm] = useState({ productId: 'p1', warehouseId: 'w1', locationId: 'l1', countedQuantity: 0, reason: '' })
+  const [form, setForm] = useState(() => ({
+    productId: searchParams.get('productId') ?? 'p1',
+    warehouseId: searchParams.get('warehouseId') ?? 'w1',
+    locationId: searchParams.get('locationId') ?? 'l1', countedQuantity: 0, reason: '',
+  }))
   const currentSystemQuantity = state.stockItems.find((s) => s.productId === form.productId && s.warehouseId === form.warehouseId && s.locationId === form.locationId)?.onHand ?? 0
   const difference = form.countedQuantity - currentSystemQuantity
 
@@ -63,8 +69,8 @@ export const AdjustmentNewPage = () => {
       <PageHeader title="New Adjustment" description="Difference = Counted Quantity - Current System Quantity" />
       <Card><CardContent className="grid gap-3 md:grid-cols-2">
         <Select value={form.productId} onChange={(e) => setForm((s) => ({ ...s, productId: e.target.value }))}>{state.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
-        <Select value={form.warehouseId} onChange={(e) => setForm((s) => ({ ...s, warehouseId: e.target.value }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
-        <Select value={form.locationId} onChange={(e) => setForm((s) => ({ ...s, locationId: e.target.value }))}>{state.locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
+        <Select value={form.warehouseId} onChange={(e) => setForm((s) => ({ ...s, warehouseId: e.target.value, locationId: state.locations.find((location) => location.warehouseId === e.target.value && location.status === 'active')?.id ?? '' }))}>{state.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select value={form.locationId} onChange={(e) => setForm((s) => ({ ...s, locationId: e.target.value }))}>{state.locations.filter((location) => location.warehouseId === form.warehouseId && location.status === 'active').map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
         <Input disabled value={currentSystemQuantity} />
         <Input type="number" value={form.countedQuantity} onChange={(e) => setForm((s) => ({ ...s, countedQuantity: Number(e.target.value) }))} />
         <div className="text-sm text-slate-300">Difference: {difference} ({difference > 0 ? 'Increase' : difference < 0 ? 'Decrease' : 'No Change'})</div>
@@ -81,7 +87,11 @@ export const AdjustmentDetailPage = () => {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const query = useQuery({ queryKey: ['adjustment', adjustmentId], queryFn: () => adjustmentService.getAdjustment(adjustmentId) })
   const adjustment = query.data
-  const applyMutation = useMutation({ mutationFn: () => adjustmentService.applyAdjustment(adjustmentId), onSuccess: () => queryClient.invalidateQueries() })
+  const applyMutation = useMutation({
+    mutationFn: () => adjustmentService.applyAdjustment(adjustmentId),
+    onSuccess: () => queryClient.invalidateQueries(),
+    onError: (error) => toast.error(error instanceof Error ? error.message : 'Adjustment could not be applied.'),
+  })
   if (!adjustment) return <p className="text-sm text-slate-400">Adjustment not found.</p>
 
   const difference = adjustment.countedQuantity - adjustment.systemQuantity
@@ -93,8 +103,8 @@ export const AdjustmentDetailPage = () => {
         <p>Counted Quantity: {adjustment.countedQuantity}</p>
         <p>Difference: {difference} ({difference > 0 ? 'Increase' : difference < 0 ? 'Decrease' : 'No Change'})</p>
       </CardContent></Card>
-      <div className="flex gap-2"><StatusBadge status={adjustment.status === 'applied' ? 'Applied' : 'Draft'} /><Button disabled={adjustment.status === 'applied'} onClick={() => setConfirmOpen(true)}>Apply Adjustment</Button></div>
-      <ConfirmDialog open={confirmOpen} title="Apply Adjustment?" message="This will reconcile system quantity to the counted quantity." confirmLabel="Apply Adjustment" onCancel={() => setConfirmOpen(false)} onConfirm={() => { setConfirmOpen(false); applyMutation.mutate() }} />
+      <div className="flex gap-2"><StatusBadge status={adjustment.status === 'applied' ? 'Applied' : 'Draft'} /><Button disabled={adjustment.status === 'applied' || applyMutation.isPending} onClick={() => setConfirmOpen(true)}>Apply Adjustment</Button></div>
+      <ConfirmDialog open={confirmOpen} title="Apply Adjustment?" message={`System quantity: ${adjustment.systemQuantity}. Counted quantity: ${adjustment.countedQuantity}. Adjustment: ${difference > 0 ? '+' : ''}${difference}.`} confirmLabel="Confirm Adjustment" onCancel={() => setConfirmOpen(false)} onConfirm={() => { setConfirmOpen(false); applyMutation.mutate() }} />
     </div>
   )
 }

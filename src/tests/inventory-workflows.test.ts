@@ -3,6 +3,7 @@ import { receiptService } from '../services/receiptService'
 import { deliveryService } from '../services/deliveryService'
 import { transferService } from '../services/transferService'
 import { adjustmentService } from '../services/adjustmentService'
+import { productService } from '../services/productService'
 import { getState, resetState, updateState } from '../services/store'
 
 describe('inventory workflows', () => {
@@ -28,6 +29,14 @@ describe('inventory workflows', () => {
     updateState((draft) => { draft.deliveries.find((row) => row.id === 'd1')!.lines[0].requestedQuantity = 999999 })
     const canFulfill = await deliveryService.canFulfillDelivery('d1')
     expect(canFulfill).toBe(false)
+  })
+
+  it('delivery readiness accounts for duplicate product lines together', async () => {
+    updateState((draft) => {
+      const delivery = draft.deliveries.find((row) => row.id === 'd2')!
+      delivery.lines.push({ id: 'dl-extra', productId: 'p5', requestedQuantity: 41, pickedQuantity: 0, packedQuantity: 0 })
+    })
+    expect(await deliveryService.canFulfillDelivery('d2')).toBe(false)
   })
 
   it('internal transfer keeps global stock total unchanged after done', async () => {
@@ -82,5 +91,14 @@ describe('inventory workflows', () => {
     expect(getState().stockItems.find((row) => row.id === 's4')!.onHand).toBe(45)
     expect(getState().moveHistory[0].quantity).toBe(-3)
     expect(getState().moveHistory[0].operation).toBe('Adjustment')
+  })
+
+  it('records product initial stock through the transaction engine', async () => {
+    const product = await productService.createProduct({
+      name: 'Test stock item', sku: 'TEST-001', categoryId: 'c1', unit: 'pcs', initialStock: 7,
+      reorderPoint: 1, defaultWarehouseId: 'w1', defaultLocationId: 'l1',
+    })
+    expect(getState().stockItems.find((row) => row.productId === product.id)?.onHand).toBe(7)
+    expect(getState().moveHistory[0]).toMatchObject({ operation: 'Adjustment', reference: product.sku, quantity: 7 })
   })
 })

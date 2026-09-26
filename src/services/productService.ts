@@ -1,5 +1,8 @@
 import { getState, updateState, wait } from './store'
 import type { Product } from '../types/domain'
+import { inventoryEngine } from './inventoryEngine'
+import { inventoryRepository } from './inventoryRepository'
+import { createId } from './ids'
 
 interface ProductPayload {
   name: string
@@ -26,7 +29,7 @@ export const productService = {
   async createProduct(payload: ProductPayload) {
     await wait()
     const product: Product = {
-      id: `p${Date.now()}`,
+      id: createId('product'),
       name: payload.name,
       sku: payload.sku,
       categoryId: payload.categoryId,
@@ -36,29 +39,9 @@ export const productService = {
       defaultLocationId: payload.defaultLocationId,
     }
 
-    updateState((draft) => {
+    inventoryRepository.transact((draft) => {
       draft.products.unshift(product)
-      draft.stockItems.push({
-        id: `s${Date.now()}`,
-        productId: product.id,
-        warehouseId: payload.defaultWarehouseId,
-        locationId: payload.defaultLocationId,
-        onHand: payload.initialStock,
-        reserved: 0,
-      })
-      draft.moveHistory.unshift({
-        id: `m${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        reference: product.sku,
-        operation: 'Adjustment',
-        productId: product.id,
-        sku: product.sku,
-        source: 'System',
-        destination: 'Initial Stock',
-        quantity: payload.initialStock,
-        user: 'Aisha Khan',
-        status: 'Applied',
-      })
+      inventoryEngine.initializeProductStock(draft, product.id, payload.initialStock, 'u1')
     })
     return product
   },

@@ -1,10 +1,11 @@
-import { getState, wait } from './store'
+import { wait } from './store'
+import { inventoryRepository } from './inventoryRepository'
 import { aggregateProductStock, stockStatusLabel } from '../utils/inventory'
 
 export const inventoryService = {
   async getDashboardMetrics() {
     await wait()
-    const state = getState()
+    const state = inventoryRepository.snapshot()
     const totals = state.products.map((product) => {
       const agg = aggregateProductStock(product, state.stockItems)
       return { product, ...agg }
@@ -23,7 +24,7 @@ export const inventoryService = {
 
   async getStockView() {
     await wait()
-    const state = getState()
+    const state = inventoryRepository.snapshot()
     return state.stockItems.map((item) => {
       const product = state.products.find((p) => p.id === item.productId)
       const warehouse = state.warehouses.find((w) => w.id === item.warehouseId)

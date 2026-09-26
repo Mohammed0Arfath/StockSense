@@ -1,5 +1,6 @@
-import type { InventoryState, StockItem } from '../types/domain'
+import type { Delivery, DocumentStatus, InternalTransfer, InventoryState, Receipt, StockItem } from '../types/domain'
 import { getLocationName, getUserName, getWarehouseName } from './helpers'
+import { createId } from './ids'
 
 export class InventoryOperationError extends Error {
   constructor(message: string) {
@@ -7,6 +8,16 @@ export class InventoryOperationError extends Error {
     this.name = 'InventoryOperationError'
   }
 }
+
+const nextStatus: Record<DocumentStatus, DocumentStatus> = {
+  draft: 'waiting',
+  waiting: 'ready',
+  ready: 'done',
+  done: 'done',
+  canceled: 'canceled',
+}
+
+const advanceStatus = (status: DocumentStatus) => nextStatus[status]
 
 const requireQuantity = (quantity: number, label: string) => {
   if (!Number.isFinite(quantity) || quantity < 0) throw new InventoryOperationError(`${label} must be a valid non-negative quantity.`)
@@ -30,16 +41,79 @@ const findStock = (state: InventoryState, productId: string, warehouseId: string
 const ensureStock = (state: InventoryState, productId: string, warehouseId: string, locationId: string): StockItem => {
   const existing = findStock(state, productId, warehouseId, locationId)
   if (existing) return existing
-  const stock: StockItem = { id: `s-${crypto.randomUUID()}`, productId, warehouseId, locationId, onHand: 0, reserved: 0 }
+  const stock: StockItem = { id: createId('stock'), productId, warehouseId, locationId, onHand: 0, reserved: 0 }
   state.stockItems.push(stock)
   return stock
 }
 
 const addLedgerEntry = (state: InventoryState, entry: Omit<InventoryState['moveHistory'][number], 'id' | 'timestamp'>) => {
-  state.moveHistory.unshift({ ...entry, id: `m-${crypto.randomUUID()}`, timestamp: new Date().toISOString() })
+  state.moveHistory.unshift({ ...entry, id: createId('move'), timestamp: new Date().toISOString() })
 }
 
 export const inventoryEngine = {
+  initializeProductStock(state: InventoryState, productId: string, quantity: number, userId: string) {
+    const product = requireProduct(state, productId)
+    requireQuantity(quantity, 'Initial quantity')
+    const location = requireLocation(state, product.defaultLocationId, product.defaultWarehouseId)
+    const stock = ensureStock(state, product.id, product.defaultWarehouseId, location.id)
+    stock.onHand += quantity
+    if (quantity > 0) {
+      const destination = `${getWarehouseName(product.defaultWarehouseId)} / ${location.name}`
+      addLedgerEntry(state, {
+        reference: product.sku,
+        operation: 'Adjustment',
+        productId: product.id,
+        sku: product.sku,
+        source: 'Initial balance',
+        destination,
+        quantity,
+        user: getUserName(userId),
+        status: 'Applied',
+      })
+    }
+  },
+
+  canDeliver(state: InventoryState, deliveryId: string) {
+    const delivery = state.deliveries.find((row) => row.id === deliveryId)
+    if (!delivery || delivery.lines.length === 0) return false
+    const requestedByProduct = new Map<string, number>()
+    for (const line of delivery.lines) {
+      if (!Number.isFinite(line.requestedQuantity) || line.requestedQuantity <= 0) return false
+      requestedByProduct.set(line.productId, (requestedByProduct.get(line.productId) ?? 0) + line.requestedQuantity)
+    }
+    return [...requestedByProduct].every(([productId, requested]) => {
+      if (!state.products.some((product) => product.id === productId)) return false
+      const available = state.stockItems
+        .filter((stock) => stock.productId === productId && stock.warehouseId === delivery.sourceWarehouseId)
+        .reduce((sum, stock) => sum + Math.max(stock.onHand - stock.reserved, 0), 0)
+      return available >= requested
+    })
+  },
+
+  advanceReceipt(state: InventoryState, receiptId: string): Receipt | null {
+    const receipt = state.receipts.find((row) => row.id === receiptId)
+    if (!receipt || receipt.status === 'done' || receipt.status === 'canceled') return null
+    if (receipt.status === 'ready') this.receive(state, receiptId)
+    else receipt.status = advanceStatus(receipt.status)
+    return receipt
+  },
+
+  advanceDelivery(state: InventoryState, deliveryId: string): Delivery | null {
+    const delivery = state.deliveries.find((row) => row.id === deliveryId)
+    if (!delivery || delivery.status === 'done' || delivery.status === 'canceled') return null
+    if (delivery.status === 'ready') this.deliver(state, deliveryId)
+    else delivery.status = advanceStatus(delivery.status)
+    return delivery
+  },
+
+  advanceTransfer(state: InventoryState, transferId: string): InternalTransfer | null {
+    const transfer = state.transfers.find((row) => row.id === transferId)
+    if (!transfer || transfer.status === 'done' || transfer.status === 'canceled') return null
+    if (transfer.status === 'ready') this.transfer(state, transferId)
+    else transfer.status = advanceStatus(transfer.status)
+    return transfer
+  },
+
   receive(state: InventoryState, receiptId: string) {
     const receipt = state.receipts.find((row) => row.id === receiptId)
     if (!receipt) throw new InventoryOperationError('Receipt not found.')

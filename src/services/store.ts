@@ -8,11 +8,12 @@ export const wait = (ms = 220) => new Promise((resolve) => setTimeout(resolve, m
 
 export const getState = () => state
 
-export const updateState = (mutator: (draft: InventoryState) => void) => {
+export const updateState = <T>(mutator: (draft: InventoryState) => T): T => {
   const draft = structuredClone(state)
-  mutator(draft)
+  const result = mutator(draft)
   state = draft
   listeners.forEach((listener) => listener())
+  return result
 }
 
 export const subscribeState = (listener: () => void) => {

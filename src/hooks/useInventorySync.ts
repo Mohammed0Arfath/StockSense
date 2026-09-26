@@ -1,11 +1,11 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { subscribeState } from '../services/store'
+import { inventoryRepository } from '../services/inventoryRepository'
 
 export const useInventorySync = () => {
   const queryClient = useQueryClient()
   useEffect(() => {
-    return subscribeState(() => {
+    return inventoryRepository.subscribe(() => {
       queryClient.invalidateQueries()
     })
   }, [queryClient])

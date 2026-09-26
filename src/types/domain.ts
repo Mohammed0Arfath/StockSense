@@ -1,5 +1,9 @@
 export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock'
 export type DocumentStatus = 'draft' | 'waiting' | 'ready' | 'done' | 'canceled'
+export type AdjustmentStatus = 'draft' | 'applied'
+export type MoveOperation = 'Receipt' | 'Delivery' | 'Internal Transfer' | 'Adjustment'
+export type LocationType = 'storage' | 'production' | 'receiving' | 'dispatch'
+export type RecordStatus = 'active' | 'inactive'
 
 export interface User {
   id: string
@@ -19,7 +23,7 @@ export interface Warehouse {
   name: string
   code: string
   address: string
-  status: 'active' | 'inactive'
+  status: RecordStatus
 }
 
 export interface Location {
@@ -27,8 +31,8 @@ export interface Location {
   name: string
   shortCode: string
   warehouseId: string
-  type: 'storage' | 'production' | 'receiving' | 'dispatch'
-  status: 'active' | 'inactive'
+  type: LocationType
+  status: RecordStatus
 }
 
 export interface Product {
@@ -119,7 +123,7 @@ export interface StockAdjustment {
   systemQuantity: number
   countedQuantity: number
   reason: string
-  status: 'draft' | 'applied'
+  status: AdjustmentStatus
   createdBy: string
   date: string
 }
@@ -128,11 +132,12 @@ export interface MoveHistoryEntry {
   id: string
   timestamp: string
   reference: string
-  operation: 'Receipt' | 'Delivery' | 'Internal Transfer' | 'Adjustment'
+  operation: MoveOperation
   productId: string
   sku: string
   source: string
   destination: string
+  /** Signed delta for receipts, deliveries, and adjustments; transfers record positive moved units. */
   quantity: number
   user: string
   status: string

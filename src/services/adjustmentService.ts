@@ -1,6 +1,6 @@
 import { getState, updateState, wait } from './store'
 import type { StockAdjustment } from '../types/domain'
-import { getProductById, getUserName } from './helpers'
+import { inventoryEngine } from './inventoryEngine'
 
 export const adjustmentService = {
   async getAdjustments() {
@@ -31,30 +31,8 @@ export const adjustmentService = {
     updateState((draft) => {
       const adjustment = draft.adjustments.find((item) => item.id === adjustmentId)
       if (!adjustment || adjustment.status === 'applied') return
-      const stock = draft.stockItems.find(
-        (item) =>
-          item.productId === adjustment.productId &&
-          item.warehouseId === adjustment.warehouseId &&
-          item.locationId === adjustment.locationId,
-      )
-      if (!stock) return
-      stock.onHand = adjustment.countedQuantity
-      adjustment.status = 'applied'
+      inventoryEngine.adjust(draft, adjustmentId)
       applied = adjustment
-      const product = getProductById(adjustment.productId)
-      draft.moveHistory.unshift({
-        id: `m${Date.now()}${adjustment.id}`,
-        timestamp: new Date().toISOString(),
-        reference: adjustment.adjustmentNumber,
-        operation: 'Adjustment',
-        productId: adjustment.productId,
-        sku: product?.sku ?? 'UNKNOWN',
-        source: `${adjustment.warehouseId}/${adjustment.locationId}`,
-        destination: `${adjustment.warehouseId}/${adjustment.locationId}`,
-        quantity: adjustment.countedQuantity - adjustment.systemQuantity,
-        user: getUserName(adjustment.createdBy),
-        status: 'Applied',
-      })
     })
     return applied
   },

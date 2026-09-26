@@ -1,6 +1,6 @@
 import { getState, updateState, wait } from './store'
 import type { DocumentStatus, InternalTransfer } from '../types/domain'
-import { getProductById } from './helpers'
+import { inventoryEngine } from './inventoryEngine'
 
 const nextStatus: Record<DocumentStatus, DocumentStatus> = {
   draft: 'waiting',
@@ -34,53 +34,13 @@ export const transferService = {
     updateState((draft) => {
       const transfer = draft.transfers.find((row) => row.id === transferId)
       if (!transfer || transfer.status === 'done' || transfer.status === 'canceled') return
+      if (transfer.status === 'ready') {
+        inventoryEngine.transfer(draft, transferId)
+        advanced = transfer
+        return
+      }
       transfer.status = nextStatus[transfer.status]
       advanced = transfer
-      if (transfer.status === 'done') {
-        transfer.lines.forEach((line) => {
-          const source = draft.stockItems.find(
-            (item) =>
-              item.productId === line.productId &&
-              item.warehouseId === transfer.sourceWarehouseId &&
-              item.locationId === transfer.sourceLocationId,
-          )
-          if (!source || source.onHand < line.quantity) return
-          source.onHand -= line.quantity
-
-          const destination = draft.stockItems.find(
-            (item) =>
-              item.productId === line.productId &&
-              item.warehouseId === transfer.destinationWarehouseId &&
-              item.locationId === transfer.destinationLocationId,
-          )
-          if (destination) destination.onHand += line.quantity
-          else {
-            draft.stockItems.push({
-              id: `s${Date.now()}${line.id}`,
-              productId: line.productId,
-              warehouseId: transfer.destinationWarehouseId,
-              locationId: transfer.destinationLocationId,
-              onHand: line.quantity,
-              reserved: 0,
-            })
-          }
-
-          const product = getProductById(line.productId)
-          draft.moveHistory.unshift({
-            id: `m${Date.now()}${line.id}`,
-            timestamp: new Date().toISOString(),
-            reference: transfer.transferNumber,
-            operation: 'Internal Transfer',
-            productId: line.productId,
-            sku: product?.sku ?? 'UNKNOWN',
-            source: `${transfer.sourceWarehouseId}/${transfer.sourceLocationId}`,
-            destination: `${transfer.destinationWarehouseId}/${transfer.destinationLocationId}`,
-            quantity: line.quantity,
-            user: 'Aisha Khan',
-            status: 'Done',
-          })
-        })
-      }
     })
     return advanced
   },

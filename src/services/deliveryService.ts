@@ -1,6 +1,5 @@
 import { getState, updateState, wait } from './store'
-import { aggregateProductStock } from '../utils/inventory'
-import { getProductById, getUserName } from './helpers'
+import { inventoryEngine } from './inventoryEngine'
 import type { Delivery, DocumentStatus } from '../types/domain'
 
 const nextStatus: Record<DocumentStatus, DocumentStatus> = {
@@ -34,46 +33,27 @@ export const deliveryService = {
     const delivery = state.deliveries.find((d) => d.id === deliveryId)
     if (!delivery) return false
     return delivery.lines.every((line) => {
-      const product = state.products.find((p) => p.id === line.productId)
-      if (!product) return false
-      const available = aggregateProductStock(product, state.stockItems).available
-      return line.requestedQuantity <= available
+      const productExists = state.products.some((p) => p.id === line.productId)
+      const available = state.stockItems
+        .filter((row) => row.productId === line.productId && row.warehouseId === delivery.sourceWarehouseId)
+        .reduce((sum, row) => sum + Math.max(row.onHand - row.reserved, 0), 0)
+      return productExists && Number.isFinite(line.requestedQuantity) && line.requestedQuantity > 0 && line.requestedQuantity <= available
     })
   },
 
   async advanceStatus(deliveryId: string) {
     await wait(120)
-    const canFulfill = await this.canFulfillDelivery(deliveryId)
     let advanced: Delivery | null = null
     updateState((draft) => {
       const delivery = draft.deliveries.find((row) => row.id === deliveryId)
       if (!delivery || delivery.status === 'done' || delivery.status === 'canceled') return
-      if (delivery.status === 'ready' && !canFulfill) return
+      if (delivery.status === 'ready') {
+        inventoryEngine.deliver(draft, deliveryId)
+        advanced = delivery
+        return
+      }
       delivery.status = nextStatus[delivery.status]
       advanced = delivery
-      if (delivery.status === 'done') {
-        delivery.lines.forEach((line) => {
-          const stock = draft.stockItems.find(
-            (item) => item.productId === line.productId && item.warehouseId === delivery.sourceWarehouseId,
-          )
-          if (!stock) return
-          stock.onHand = Math.max(stock.onHand - line.requestedQuantity, 0)
-          const product = getProductById(line.productId)
-          draft.moveHistory.unshift({
-            id: `m${Date.now()}${line.id}`,
-            timestamp: new Date().toISOString(),
-            reference: delivery.deliveryNumber,
-            operation: 'Delivery',
-            productId: line.productId,
-            sku: product?.sku ?? 'UNKNOWN',
-            source: delivery.sourceWarehouseId,
-            destination: delivery.customer,
-            quantity: -line.requestedQuantity,
-            user: getUserName(delivery.createdBy),
-            status: 'Done',
-          })
-        })
-      }
     })
     return advanced
   },
